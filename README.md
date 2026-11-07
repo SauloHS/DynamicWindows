@@ -1,0 +1,259 @@
+<p align="center">
+  <img src="assets/banner.svg" alt="DynamicWindows — your desktop, one small island" width="100%" />
+</p>
+
+<p align="center">
+  <a href="https://github.com/SauloHS/DynamicWindows/releases/latest"><img src="https://img.shields.io/github/v/release/SauloHS/DynamicWindows?style=flat-square&color=89cfff" alt="Latest release" /></a>
+  <img src="https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-89cfff?style=flat-square" alt="Windows 10 and 11 x64" />
+  <img src="https://img.shields.io/badge/built%20with-C11%20%2F%20Win32-aea4ff?style=flat-square" alt="Built with C11 and Win32" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-95dfb1?style=flat-square" alt="GPL-3.0 license" /></a>
+</p>
+
+<h1 align="center">DynamicWindows</h1>
+<p align="center"><strong>A small island for the things happening on your PC.</strong></p>
+<p align="center">Music. Timers. Volume. Power.<br />Native Windows controls, fluid motion, and a desktop that stays yours.</p>
+
+<p align="center">
+  <a href="https://github.com/SauloHS/DynamicWindows/releases/latest"><strong>Download for Windows</strong></a>
+  &nbsp;·&nbsp; <a href="#make-it-yours">Customization</a>
+  &nbsp;·&nbsp; <a href="#build-from-source">Build from source</a>
+  &nbsp;·&nbsp; <a href="https://github.com/SauloHS/DynamicWindows/issues">Report a bug</a>
+</p>
+
+---
+
+## A little less window switching
+
+DynamicWindows brings a Dynamic Island-inspired activity surface to **Windows 10 and 11**. It sits near the top of your display, gives you quick access to what is happening, and gets out of the way when you are done.
+
+**One portable executable. No Electron. No web runtime. No account.**
+
+- **Your music, within reach.** Read the current Windows media session, see artwork, play or pause, skip tracks, and seek when the player supports it.
+- **Small by default.** A blank 80 × 28 logical-pixel pill becomes an artwork-and-waveform surface during playback. Changes briefly reveal the title without leaving a big panel open.
+- **A timer that stays visible.** Start, pause, resume, or reset a countdown. Simultaneous media and timer activity can split into two bubbles.
+- **System controls without the detour.** Adjust volume and mute, see power changes, and open the actual Windows Search panel.
+- **Motion with continuity.** Interruptible springs, adjustable damping, and slide-and-fade hide/show transitions. Windows' reduced-motion setting is respected.
+- **Yours to configure.** Six native settings tabs, live preview, saved preferences, monitor placement, colors, and customizable app shortcuts.
+
+> **Early release:** v0.1.0 is a usable first version, not a finished operating-system component. Media support depends on what your player exposes to Windows. Bug reports with reproduction steps are welcome.
+
+## Get started
+
+1. Open **[Releases](https://github.com/SauloHS/DynamicWindows/releases/latest)**.
+2. Download **`DynamicWindows-0.1.0-windows-x64.zip`** and extract it into a folder you want to keep.
+3. Run **`DynamicWindows.exe`**. No installer or administrator privileges are required.
+4. Play music, click the island, or press **Ctrl + Alt + D**.
+5. Open settings with **Ctrl + Alt + C**, the island's gear button, or **right-click → Customize DynamicWindows**.
+
+The initial setup uses a blank **80 × 28** idle pill, a **36 px** media width increase, no border or camera-style dot, and an adjustable 120 FPS animation target. Settings do not open automatically at startup.
+
+The release is **unsigned**. Windows may display a SmartScreen or publisher warning. Verify the repository and the release checksum before choosing whether to run it; do not disable Windows security features. Managed PCs may require administrator approval under organizational policy.
+
+### Default shortcuts
+
+| Action | Shortcut |
+|---|---|
+| Open or collapse the island | **Ctrl + Alt + D** |
+| Open the countdown timer | **Ctrl + Alt + T** |
+| Hide or show the island | **Ctrl + Alt + H** |
+| Open settings | **Ctrl + Alt + C** |
+| Open Windows Search | **Ctrl + Alt + F** |
+| Collapse the focused island | **Escape** |
+| Switch to media / timer / system | **1 / 2 / 3** |
+| Open settings from the focused island | **F2** or **Ctrl + Comma** |
+| Play/pause from the media panel | **Space** |
+| Adjust a focused slider | **Left / Right**, **Home / End** |
+
+Every app shortcut above can be changed in **Shortcuts**. Enter `None` to disable a binding. Duplicate bindings in the same scope are rejected. If another app owns a global shortcut, choose a different one.
+
+**Tab / Shift + Tab** and **Enter / Space** button activation remain standard keyboard navigation. Settings also supports **Ctrl + Tab**, **Ctrl + Page Up / Down**, and **Ctrl + S** for tab switching and Apply.
+
+## How the island behaves
+
+### Music
+
+The compact media pill uses **idle width + media extra width**, idle height, and idle corner settings. Its circular artwork shrinks to fit smaller heights. The waveform represents the **default system output**, not isolated audio from one application.
+
+A track, artist, playback-state, or seek change briefly displays the title. After the preview timeout, the title fades away; the pill keeps the same compact geometry. Click or hover to open the full player.
+
+The expanded player uses **dimmed album artwork as its background**, with a readable track title, artist, and friendly app label such as “Spotify.” Disable **Artwork background** to use a separate cover instead.
+
+Playback position combines the player's timeline timestamp with a continuous local clock. Source-app updates and accuracy are still subject to Windows media support. Controls the source app does not support are disabled rather than simulated.
+
+### Hide, without missing every change
+
+The hide shortcut slides and fades the island away. Supported media changes, timer events, volume changes, and power alerts briefly reveal a hidden island, then restore its hidden state.
+
+Full-screen suppression takes priority. Clicking a temporary preview explicitly opens the island. Clicking outside a manually opened island collapses it without blocking the outside click.
+
+### Timers and system activity
+
+Choose a 1-, 5-, 15-, or 25-minute preset, or set a different initial duration in settings. Completion produces an alert and optional sound. Timers use a monotonic deadline, including after sleep, but **do not survive quitting the app**.
+
+Volume and power use Windows APIs. Desktop PCs without a battery display that state honestly. There is no invented battery percentage.
+
+## Make it yours
+
+Open settings with **Ctrl + Alt + C**, **right-click → Customize DynamicWindows**, the gear button, or:
+
+```powershell
+.\DynamicWindows.exe --settings
+```
+
+| Tab | What you can change |
+|---|---|
+| **Idle** | Clock, date, custom text, battery, volume, blank or hidden; typeface; clock format; decorative camera-style dot. |
+| **Layout** | Idle dimensions, timer dimensions, expanded dimensions, media width increase, corner radii, bubbles, alerts, monitor, nine anchors, and offsets. |
+| **Appearance** | RGB colors and native color pickers, opacity, border thickness, and shadow. |
+| **Motion** | Response time, spring damping, animation frame-rate target, and reduced motion. |
+| **Behavior** | Activity visibility, artwork background, waveform, media details, preview duration, volume/power alerts, hover delays, timer sound, and full-screen hiding. |
+| **Shortcuts** | Global and local key bindings, with duplicate validation and optional disabling. |
+
+<p align="center"><img src="assets/settings.png" alt="DynamicWindows native settings window with six customization tabs" width="760" /></p>
+
+**Live preview** changes the island without saving. **Apply** saves a new baseline. **Cancel** restores the last applied configuration. **Reset defaults** resets the draft, not your saved file.
+
+All sizes are **logical pixels**. The renderer adapts to display DPI and constrains placement to keep controls reachable. The legacy media width/height settings are retained for configuration compatibility; compact playback and brief title previews follow idle geometry.
+
+### Your settings stay on your PC
+
+Preferences are saved in:
+
+```text
+%LOCALAPPDATA%\DynamicWindows\settings.ini
+```
+
+The shipped preset is documented in [`resources/defaults.ini`](resources/defaults.ini). It is also compiled into the app: you do not need to copy a configuration file to get the defaults.
+
+Users of the earlier MacNotch build can keep their settings. If no DynamicWindows configuration exists, the app reads the old `%LOCALAPPDATA%\MacNotch\settings.ini`. The next Apply saves under DynamicWindows without deleting the old file.
+
+Use a separate profile when needed:
+
+```powershell
+.\DynamicWindows.exe --config C:\path\my-island.ini --settings
+```
+
+## Privacy, honestly
+
+- No app network requests, telemetry, accounts, or cloud configuration.
+- No microphone capture, audio recording, camera access, or screen recording.
+- No notification-database scraping or background reading of other apps' messages.
+- Media metadata comes from **Windows GSMTC**. The waveform uses an audio-output peak meter.
+- An outside-click listener is active for manually opened controls; it closes the island without swallowing the click.
+- The optional development GUI checks take screenshots. Those files are local test output, not part of the release.
+
+The camera-style dot is **decorative**. It is not a camera privacy indicator.
+
+## What v0.1.0 does not do
+
+DynamicWindows is an independent Windows app—not Apple software, a Windows shell replacement, or a complete iOS/macOS port.
+
+- It does **not** mirror Discord, Teams, email, or other Windows Notification Center toasts.
+- It does not integrate Siri, AirDrop, phone calls, Face ID, delivery tracking, or third-party Live Activities.
+- It does not reserve desktop space. The overlay can overlap app toolbars; move it or hide it when needed.
+- It cannot appear on Windows' secure desktop or lock screen.
+- It does not enable automatic startup or update itself.
+- Windows on ARM is not a native build target for this release.
+
+Reading other apps' toasts would require a separate Windows notification-listener integration with explicit user permission. It is not silently enabled here.
+
+## Build from source
+
+**Toolchain:** Windows x64, MinGW-w64 GCC, CMake 3.20+, Ninja, and clang-format. No downloaded application framework is required.
+
+```powershell
+git clone https://github.com/SauloHS/DynamicWindows.git
+cd DynamicWindows
+cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_RC_COMPILER=windres -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+.\build\DynamicWindows.exe
+```
+
+If GCC is not on PATH, pass full compiler paths, for example `C:/mingw64/bin/gcc.exe` and `C:/mingw64/bin/windres.exe`. Do not reuse a build directory configured for another compiler.
+
+The executable links the compiler runtime statically and uses Windows system DLLs. It does not need MinGW DLLs installed on the target PC. MinGW is required for this build because its GDI+ headers expose the flat C API.
+
+### Development checks
+
+```powershell
+cmake --build build --target typecheck
+ctest --test-dir build --output-on-failure
+cmake --build build --target lint
+```
+
+- **Core tests:** countdown deadlines, pause/resume, priority, geometry, and frame-rate-independent springs.
+- **Configuration tests:** defaults, Unicode persistence, limits, placement, and malformed input.
+- **Native smoke:** renders representative states and checks alpha hit-testing and accessibility names/roles.
+
+Optional GUI checks require Python 3 and an interactive Windows desktop. They move the pointer, foreground the test app, and save local screenshots. Quit any existing instance first, and do not share screenshots containing private desktop content.
+
+```powershell
+python -I tests/gui_check.py build/DynamicWindows.exe build/smoke --settings
+python -I tests/gui_check.py build/DynamicWindows.exe build/smoke --search
+python -I tests/gui_check.py build/DynamicWindows.exe build/smoke --live-media
+```
+
+The live-media check uses an included native test publisher. It publishes a real Windows media session but does not play or capture audio.
+
+### Useful launch options
+
+```powershell
+.\DynamicWindows.exe --settings
+.\DynamicWindows.exe --view timer
+.\DynamicWindows.exe --view system --reduced-motion
+.\DynamicWindows.exe --run-for 10
+.\DynamicWindows.exe --help
+```
+
+`--demo` explicitly simulates a media session for development. Normal operation never fills missing activity with fake data.
+
+## Troubleshooting
+
+<details>
+<summary><strong>Nothing appears to happen after launch</strong></summary>
+
+The default idle pill is intentionally small and blank. Look near the top center of the primary display, press **Ctrl + Alt + D**, or right-click the system tray icon. A hidden/full-screen state or a conflicting shortcut can also affect visibility.
+
+</details>
+
+<details>
+<summary><strong>Music, artwork, or seeking is missing</strong></summary>
+
+Play something in a source app that exposes Windows media controls. DynamicWindows follows the current GSMTC session. Not every player publishes artwork, duration, seeking, or transport capabilities. Unsupported controls are disabled. Include the source app and Windows version in a bug report.
+
+</details>
+
+<details>
+<summary><strong>A shortcut does not work</strong></summary>
+
+Another app or Windows may own it. Open settings from the tray icon and select another binding in **Shortcuts**. Standard keyboard navigation remains available.
+
+</details>
+
+<details>
+<summary><strong>How do I uninstall it?</strong></summary>
+
+Quit from the tray menu and delete the folder containing the executable. Optionally remove `%LOCALAPPDATA%\DynamicWindows` to delete saved settings. There is no installer or automatically created startup entry to undo.
+
+</details>
+
+## Contributing
+
+Small, focused fixes are welcome. For a bug report, include:
+
+1. Windows version and display scaling.
+2. The player or app involved, if relevant.
+3. Reproduction steps, expected behavior, and actual behavior.
+4. A cropped screenshot or recording **without private content**.
+
+Build with the warning-as-error flags, run the checks relevant to your change, and keep the implementation native C. Please discuss large integrations in an issue before introducing a new framework or service.
+
+If the app earns a place on your desktop, a star helps other people find it.
+
+## License
+
+Copyright © 2026 DynamicWindows contributors. Released under the **[GNU General Public License v3.0](LICENSE)**. You may use, modify, and redistribute it under the license's terms. Distributed derivatives must preserve the applicable GPL obligations and provide corresponding source.
+
+**There is no warranty.** See the license for the full terms.
+
+Windows, Spotify, and Apple product names belong to their respective owners. DynamicWindows is not affiliated with or endorsed by them. The banner and interface icons are original; no Apple logos or bundled proprietary fonts are used.

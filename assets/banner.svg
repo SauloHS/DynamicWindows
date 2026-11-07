@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="540" viewBox="0 0 1280 540" role="img" aria-labelledby="title description">
+  <title id="title">DynamicWindows</title>
+  <desc id="description">A native activity island for Windows. Original product illustration.</desc>
+  <defs>
+    <linearGradient id="ground" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#111722"/>
+      <stop offset="1" stop-color="#080b10"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#92d8ff"/>
+      <stop offset="1" stop-color="#a59cff"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1" fill="#8aa5cf" opacity=".1"/>
+    </pattern>
+    <filter id="shadow" x="-40%" y="-60%" width="180%" height="220%">
+      <feGaussianBlur stdDeviation="14"/>
+    </filter>
+  </defs>
+  <rect width="1280" height="540" rx="24" fill="url(#ground)"/>
+  <rect width="1280" height="540" rx="24" fill="url(#grid)"/>
+  <path d="M800 120h345M800 420h345" stroke="#242f41" stroke-width="1"/>
+  <text x="88" y="136" fill="#9dd8ff" font-family="Segoe UI,Arial,sans-serif" font-size="15" font-weight="600" letter-spacing="3">YOUR DESKTOP. ONE SMALL ISLAND.</text>
+  <text x="84" y="227" fill="#f5f5f7" font-family="Segoe UI,Arial,sans-serif" font-size="72" font-weight="700" letter-spacing="-2">DynamicWindows</text>
+  <text x="88" y="280" fill="#aeb9ca" font-family="Segoe UI,Arial,sans-serif" font-size="25">Music, timers, and system controls.</text>
+  <text x="88" y="317" fill="#aeb9ca" font-family="Segoe UI,Arial,sans-serif" font-size="25">There when you need them. Quiet when you don't.</text>
+  <rect x="88" y="382" width="112" height="36" rx="18" fill="#1b2533"/>
+  <text x="144" y="406" text-anchor="middle" fill="#d5e9fa" font-family="Segoe UI,Arial,sans-serif" font-size="14">C11 / Win32</text>
+  <rect x="212" y="382" width="120" height="36" rx="18" fill="#1b2533"/>
+  <text x="272" y="406" text-anchor="middle" fill="#d5e9fa" font-family="Segoe UI,Arial,sans-serif" font-size="14">Windows x64</text>
+  <rect x="344" y="382" width="116" height="36" rx="18" fill="#1b2533"/>
+  <text x="402" y="406" text-anchor="middle" fill="#d5e9fa" font-family="Segoe UI,Arial,sans-serif" font-size="14">Open source</text>
+  <rect x="858" y="233" width="286" height="100" rx="50" fill="#000" opacity=".5" filter="url(#shadow)"/>
+  <rect x="830" y="208" width="286" height="96" rx="48" fill="#040506" stroke="#313b4b"/>
+  <circle cx="875" cy="256" r="25" fill="url(#accent)"/>
+  <path d="M872 268v-24l12-3v24m-12 2c-7-4-12 5-6 7 4 2 7-1 6-7m12-4c-7-4-12 5-6 7 4 2 7-1 6-7" fill="none" stroke="#0c1726" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#9dd8ff">
+    <rect x="1032" y="251" width="4" height="10" rx="2"/>
+    <rect x="1043" y="242" width="4" height="28" rx="2"/>
+    <rect x="1054" y="237" width="4" height="38" rx="2"/>
+    <rect x="1065" y="246" width="4" height="20" rx="2"/>
+    <rect x="1076" y="250" width="4" height="12" rx="2"/>
+  </g>
+  <circle cx="1152" cy="256" r="32" fill="#040506" stroke="#313b4b"/>
+  <circle cx="1152" cy="258" r="16" fill="none" stroke="#ffb74d" stroke-width="2"/>
+  <path d="M1148 234h8m-4 0v5m0 9v10l6 4" fill="none" stroke="#ffb74d" stroke-width="2" stroke-linecap="round"/>
+  <text x="1007" y="372" text-anchor="middle" fill="#78879b" font-family="Segoe UI,Arial,sans-serif" font-size="14">Small surface. Real Windows integrations.</text>
+  <text x="88" y="482" fill="#6e8198" font-family="Segoe UI,Arial,sans-serif" font-size="13">v0.1.0  /  PORTABLE  /  GPL-3.0</text>
+</svg>
