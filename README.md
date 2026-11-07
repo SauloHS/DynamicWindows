@@ -125,8 +125,6 @@ Preferences are saved in:
 
 The shipped preset is documented in [`resources/defaults.ini`](resources/defaults.ini). It is also compiled into the app: you do not need to copy a configuration file to get the defaults.
 
-Users of the earlier MacNotch build can keep their settings. If no DynamicWindows configuration exists, the app reads the old `%LOCALAPPDATA%\MacNotch\settings.ini`. The next Apply saves under DynamicWindows without deleting the old file.
-
 Use a separate profile when needed:
 
 ```powershell
