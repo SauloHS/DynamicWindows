@@ -41,6 +41,9 @@ typedef struct {
 
 int headphones_battery(unsigned long type, const void *value, unsigned long size);
 bool headphones_same(const HeadphoneDevice *first, const HeadphoneDevice *second);
+const HeadphoneDevice *headphones_select(const HeadphoneSnapshot *snapshot,
+                                         const wchar_t *output_id);
+double headphones_progress(int battery_percent);
 unsigned headphones_changes(const HeadphoneSnapshot *previous, const HeadphoneSnapshot *current,
                             HeadphoneEvent *events, unsigned capacity);
 void headphones_detail(const HeadphoneDevice *device, bool show_battery, wchar_t *text,

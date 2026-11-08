@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-labelledby="earbuds-title">
+  <title id="earbuds-title">DynamicWindows wireless earbuds</title>
+  <path fill="#F5F5F7" d="M 12 5 C 6 5 3 9 3 14 C 3 19 6 22 11 22 L 13 22 L 13 38 C 13 41 14 43 17 43 C 20 43 21 41 21 38 L 21 16 C 21 9 18 5 12 5 Z"/>
+  <path fill="#F5F5F7" d="M 36 5 C 42 5 45 9 45 14 C 45 19 42 22 37 22 L 35 22 L 35 38 C 35 41 34 43 31 43 C 28 43 27 41 27 38 L 27 16 C 27 9 30 5 36 5 Z"/>
+  <path fill="#A6A6AD" d="M 9 10 C 6 10 6 17 9 17 C 12 17 12 10 9 10 Z M 39 10 C 36 10 36 17 39 17 C 42 17 42 10 39 10 Z"/>
+  <path fill="#A6A6AD" d="M 15 37 L 19 37 L 19 39 C 19 40 15 40 15 39 Z M 29 37 L 33 37 L 33 39 C 33 40 29 40 29 39 Z"/>
+</svg>

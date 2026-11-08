@@ -16,6 +16,7 @@
 #define UI_HEIGHT 316
 #define UI_TOP 16
 #define UI_HITS 24
+#define EARBUD_PATH_COUNT 2
 #define WM_DYNAMICWINDOWS_ACCESS (WM_APP + 2)
 #define WM_DYNAMICWINDOWS_TRAY (WM_APP + 3)
 #define WM_DYNAMICWINDOWS_OUTSIDE (WM_APP + 4)
@@ -92,6 +93,7 @@ typedef struct {
     GpStringFormat *text_format;
     GpImage *artwork;
     IStream *artwork_stream;
+    GpPath *earbuds[EARBUD_PATH_COUNT];
     double opacity;
     uint32_t colors[TINT_COUNT];
     double border_width;
@@ -207,6 +209,7 @@ void app_animate(App *app);
 void app_event(App *app, bool media_change);
 bool app_register_shortcuts(App *app);
 double app_media_position(const App *app);
+const HeadphoneDevice *app_headphones(const App *app);
 void app_media_name(const App *app, wchar_t *text, size_t count);
 void app_idle_label(const App *app, wchar_t *text, size_t count);
 void app_summary(const App *app, wchar_t *text, size_t count);

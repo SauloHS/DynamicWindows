@@ -121,6 +121,99 @@ static void text(Renderer *renderer, const wchar_t *value, RectF rect, UiFont fo
     GdipDeleteBrush((GpBrush *)brush);
 }
 
+static bool svg_path(GpPath *path, const char *start, const char *end) {
+    double x = 0;
+    double y = 0;
+    while (start < end) {
+        while (start < end && (*start == ' ' || *start == ','))
+            ++start;
+        if (start == end)
+            break;
+        char command = *start++;
+        if (command == 'Z') {
+            if (GdipClosePathFigure(path) != Ok)
+                return false;
+            continue;
+        }
+        unsigned count = command == 'C' ? 6 : command == 'M' || command == 'L' ? 2 : 0;
+        if (!count)
+            return false;
+        double values[6];
+        for (unsigned i = 0; i < count; ++i) {
+            while (start < end && (*start == ' ' || *start == ','))
+                ++start;
+            char *next = NULL;
+            values[i] = strtod(start, &next);
+            if (next == start || next > end || !isfinite(values[i]))
+                return false;
+            start = next;
+        }
+        if (command == 'M') {
+            GdipStartPathFigure(path);
+            x = values[0];
+            y = values[1];
+        } else if (command == 'L') {
+            if (GdipAddPathLine(path, (REAL)x, (REAL)y, (REAL)values[0], (REAL)values[1]) != Ok)
+                return false;
+            x = values[0];
+            y = values[1];
+        } else {
+            if (GdipAddPathBezier(path, (REAL)x, (REAL)y, (REAL)values[0], (REAL)values[1],
+                                  (REAL)values[2], (REAL)values[3], (REAL)values[4],
+                                  (REAL)values[5]) != Ok)
+                return false;
+            x = values[4];
+            y = values[5];
+        }
+    }
+    return true;
+}
+
+static bool earbuds_init(App *app) {
+    HRSRC resource = FindResourceW(app->instance, MAKEINTRESOURCEW(101), RT_RCDATA);
+    DWORD size = resource ? SizeofResource(app->instance, resource) : 0;
+    HGLOBAL loaded = resource ? LoadResource(app->instance, resource) : NULL;
+    const char *bytes = loaded ? LockResource(loaded) : NULL;
+    if (!bytes || !size || size > 8192)
+        return false;
+    char *svg = calloc((size_t)size + 1, 1);
+    if (!svg)
+        return false;
+    memcpy(svg, bytes, size);
+    const char *position = svg;
+    bool valid = true;
+    for (unsigned i = 0; i < EARBUD_PATH_COUNT; ++i) {
+        const char *start = strstr(position, " d=\"");
+        const char *end = start ? strchr(start + 4, '"') : NULL;
+        if (!end || GdipCreatePath(FillModeWinding, &app->renderer.earbuds[i]) != Ok ||
+            !svg_path(app->renderer.earbuds[i], start + 4, end)) {
+            valid = false;
+            break;
+        }
+        position = end + 1;
+    }
+    free(svg);
+    return valid;
+}
+
+static void earbuds(Renderer *renderer, double x, double y, double size) {
+    GraphicsState state;
+    if (GdipSaveGraphics(renderer->graphics, &state) != Ok)
+        return;
+    GdipTranslateWorldTransform(renderer->graphics, (REAL)(x - size / 2), (REAL)(y - size / 2),
+                                MatrixOrderPrepend);
+    GdipScaleWorldTransform(renderer->graphics, (REAL)(size / 48), (REAL)(size / 48),
+                            MatrixOrderPrepend);
+    for (unsigned i = 0; i < EARBUD_PATH_COUNT; ++i) {
+        GpSolidFill *brush = NULL;
+        if (renderer->earbuds[i] && GdipCreateSolidFill(ink(renderer, COLOR_TEXT), &brush) == Ok) {
+            GdipFillPath(renderer->graphics, (GpBrush *)brush, renderer->earbuds[i]);
+            GdipDeleteBrush((GpBrush *)brush);
+        }
+    }
+    GdipRestoreGraphics(renderer->graphics, state);
+}
+
 static void glyph(Renderer *renderer, Glyph symbol, double x, double y, double size, ARGB color) {
     double left = x - size / 2;
     double top = y - size / 2;
@@ -433,6 +526,54 @@ static void timer_ring(App *app, double x, double y, double size) {
     arc(&app->renderer, rect, -90, 360 * island_timer_progress(&app->island), COLOR_TIMER, 2.5);
 }
 
+static void headphone_ring(App *app, const HeadphoneDevice *device, double x, double y, double size,
+                           bool number) {
+    Renderer *renderer = &app->renderer;
+    bool known = device->bluetooth && app->config.headphone_battery &&
+                 headphones_progress(device->battery_percent) >= 0;
+    RectF rect = {(REAL)(x - size / 2), (REAL)(y - size / 2), (REAL)size, (REAL)size};
+    double stroke = number ? 3.5 : 2;
+    arc(renderer, rect, 0, 360, known ? COLOR_CONTROL : COLOR_SECONDARY, stroke);
+    if (known)
+        arc(renderer, rect, -90, 360 * headphones_progress(device->battery_percent),
+            device->battery_percent <= 20 ? COLOR_TIMER : COLOR_GOOD, stroke);
+    if (number) {
+        wchar_t value[16];
+        if (known)
+            swprintf(value, 16, L"%d", device->battery_percent);
+        else
+            wcscpy(value, L"?");
+        text(renderer, value, rect, FONT_TITLE, COLOR_TEXT, StringAlignmentCenter);
+    } else if (!known) {
+        line(renderer, x - 2, y, x + 2, y, COLOR_SECONDARY, 1.5);
+    }
+}
+
+static double headphone_status(App *app, const HeadphoneDevice *device, bool idle, bool add_hits) {
+    Renderer *renderer = &app->renderer;
+    RectF body = renderer->body;
+    double middle = body.Y + body.Height / 2;
+    double size = fmin(24, fmax(12, body.Height - 10));
+    bool battery = device->bluetooth && app->config.headphone_battery;
+    double right = body.X + body.Width - 10;
+    double icon_x =
+        idle ? body.X + 10 + size / 2 : right - (battery ? size * 2 + 10 : size) + size / 2;
+    earbuds(renderer, icon_x, middle, size);
+    if (battery)
+        headphone_ring(app, device, right - size / 2, middle, size, false);
+    if (add_hits && !idle) {
+        wchar_t detail[160];
+        wchar_t label[360];
+        headphones_detail(device, app->config.headphone_battery, detail, 160);
+        swprintf(label, 360, L"%ls. %ls. Open system controls.", device->name, detail);
+        hit_add(app,
+                (RectF){(REAL)(icon_x - size / 2 - 4), body.Y,
+                        (REAL)(right - icon_x + size / 2 + 4), body.Height},
+                ACTION_TAB_SYSTEM, true, label);
+    }
+    return idle ? 0 : battery ? size * 2 + 20 : size + 12;
+}
+
 static void compact(App *app, bool add_hits) {
     Renderer *renderer = &app->renderer;
     RectF body = renderer->body;
@@ -482,20 +623,33 @@ static void compact(App *app, bool add_hits) {
     }
     if (app->island.alert == ALERT_HEADPHONES) {
         const HeadphoneEvent *event = &app->headphone_event;
-        wchar_t detail[160];
-        if (event->change == HEADPHONE_DISCONNECTED)
-            wcscpy(detail, L"Disconnected");
-        else
-            headphones_detail(&event->device, app->config.headphone_battery, detail, 160);
-        glyph(renderer, GLYPH_HEADPHONES, body.X + 30, middle, 27,
-              event->change == HEADPHONE_DISCONNECTED ? COLOR_SECONDARY : COLOR_ACCENT);
-        text(renderer, event->device.name, (RectF){body.X + 59, body.Y + 10, body.Width - 80, 24},
-             FONT_LABEL, COLOR_TEXT, StringAlignmentNear);
-        text(renderer, detail, (RectF){body.X + 59, body.Y + 36, body.Width - 80, 22}, FONT_BODY,
-             COLOR_SECONDARY, StringAlignmentNear);
+        double size = fmin(42, body.Height - 24);
+        earbuds(renderer, body.X + 34, middle, size);
+        const wchar_t *status = event->change == HEADPHONE_DISCONNECTED ? L"Disconnected"
+                                : event->change == HEADPHONE_BATTERY    ? L"Battery"
+                                                                        : L"Connected";
+        REAL right_space = event->device.bluetooth && app->config.headphone_battery ? 78 : 22;
+        text(renderer, status,
+             (RectF){body.X + 65, (REAL)(middle - 23), body.Width - 65 - right_space, 21},
+             FONT_SMALL, COLOR_SECONDARY, StringAlignmentNear);
+        text(renderer, event->device.name,
+             (RectF){body.X + 65, (REAL)(middle - 1), body.Width - 65 - right_space, 25},
+             FONT_TITLE, COLOR_TEXT, StringAlignmentNear);
+        if (event->device.bluetooth && app->config.headphone_battery &&
+            event->change != HEADPHONE_DISCONNECTED)
+            headphone_ring(app, &event->device, body.X + body.Width - 42, middle,
+                           fmin(48, body.Height - 22), true);
         return;
     }
     IslandActivity primary = app_primary(app);
+    const HeadphoneDevice *headphones = app_headphones(app);
+    if (headphones && primary == ACTIVITY_NONE) {
+        headphone_status(app, headphones, true, false);
+        return;
+    }
+    RectF content = body;
+    if (headphones)
+        content.Width -= (REAL)headphone_status(app, headphones, false, add_hits);
     if (primary == ACTIVITY_MEDIA) {
         REAL icon_size = (REAL)fmin(28, fmax(10, body.Height - 12));
         RectF icon = {body.X + 8, (REAL)(middle - icon_size / 2), icon_size, icon_size};
@@ -508,7 +662,7 @@ static void compact(App *app, bool add_hits) {
         }
         double peek = island_clamp(app->media_peek.value, 0, 1);
         REAL text_left = icon.X + icon_size + 10;
-        REAL text_right = body.X + body.Width - (app->config.waveform ? 46 : 8);
+        REAL text_right = content.X + content.Width - (app->config.waveform ? 46 : 8);
         if (peek > 0.01 && text_right > text_left) {
             double opacity = renderer->opacity;
             renderer->opacity *= peek;
@@ -519,17 +673,18 @@ static void compact(App *app, bool add_hits) {
         }
         if (app->config.waveform) {
             double wave_height = fmin(22, fmax(3, body.Height - 12));
-            waveform(app, body.X + body.Width - 38, middle - wave_height / 2, 28, wave_height);
+            waveform(app, content.X + content.Width - 38, middle - wave_height / 2, 28,
+                     wave_height);
         }
     } else if (primary == ACTIVITY_TIMER) {
         wchar_t clock[32];
         app_clock(app->island.timer.remaining, clock, 32);
         glyph(renderer, GLYPH_TIMER, body.X + 25, middle, 19, COLOR_TIMER);
-        text(renderer, clock, (RectF){body.X + 46, (REAL)(middle - 14), body.Width - 91, 28},
+        text(renderer, clock, (RectF){body.X + 46, (REAL)(middle - 14), content.Width - 91, 28},
              FONT_TITLE, COLOR_TEXT, StringAlignmentCenter);
-        timer_ring(app, body.X + body.Width - 28, middle, 23);
+        timer_ring(app, content.X + content.Width - 28, middle, 23);
         if (app->island.timer.paused)
-            glyph(renderer, GLYPH_PAUSE, body.X + body.Width - 28, middle, 11, COLOR_TIMER);
+            glyph(renderer, GLYPH_PAUSE, content.X + content.Width - 28, middle, 11, COLOR_TIMER);
     } else {
         wchar_t idle_label[256];
         app_idle_label(app, idle_label, 256);
@@ -736,8 +891,9 @@ static void system_panel(App *app, bool add_hits) {
          app->system.audio_available ? app->system.output_name : L"No audio output detected",
          (RectF){body.X + 24, body.Y + 94, body.Width - 48, 22}, FONT_SMALL, COLOR_SECONDARY,
          StringAlignmentNear);
-    if (app->headphones.count) {
-        const HeadphoneDevice *device = &app->headphones.devices[0];
+    const HeadphoneDevice *connected = headphones_select(&app->headphones, app->platform.device_id);
+    if (connected) {
+        const HeadphoneDevice *device = connected;
         wchar_t detail[320];
         wchar_t connection[160];
         headphones_detail(device, app->config.headphone_battery, connection, 160);
@@ -870,7 +1026,7 @@ bool renderer_init(App *app) {
         return false;
     GdipSetStringFormatLineAlign(renderer->text_format, StringAlignmentCenter);
     GdipSetStringFormatTrimming(renderer->text_format, StringTrimmingEllipsisCharacter);
-    return renderer_style(app) && renderer_resize(app);
+    return earbuds_init(app) && renderer_style(app) && renderer_resize(app);
 }
 
 void renderer_artwork(App *app, const BYTE *data, UINT size) {
@@ -905,6 +1061,9 @@ void renderer_destroy(Renderer *renderer) {
         IStream_Release(renderer->artwork_stream);
     if (renderer->text_format)
         GdipDeleteStringFormat(renderer->text_format);
+    for (unsigned i = 0; i < EARBUD_PATH_COUNT; ++i)
+        if (renderer->earbuds[i])
+            GdipDeletePath(renderer->earbuds[i]);
     for (int i = 0; i < FONT_COUNT; ++i)
         if (renderer->fonts[i])
             GdipDeleteFont(renderer->fonts[i]);

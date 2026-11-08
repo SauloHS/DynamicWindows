@@ -1,6 +1,7 @@
 #include <windows.h>
 
 1 RT_MANIFEST "dynamicwindows.manifest"
+101 RCDATA "../assets/earbuds.svg"
 
 1 VERSIONINFO
 FILEVERSION 0,1,0,0

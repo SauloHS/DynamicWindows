@@ -94,10 +94,27 @@ static void test_details(void) {
     CHECK(wcsstr(text, L"Wired") != NULL);
 }
 
+static void test_selection(void) {
+    HeadphoneSnapshot snapshot = {.initialized = true, .count = 2};
+    snapshot.devices[0] = device(1, false, -1);
+    snapshot.devices[1] = device(2, true, 80);
+    CHECK(headphones_select(&snapshot, NULL) == &snapshot.devices[1]);
+    CHECK(headphones_select(&snapshot, snapshot.devices[0].id) == &snapshot.devices[0]);
+    CHECK(headphones_select(&snapshot, L"missing") == &snapshot.devices[1]);
+    snapshot.count = 0;
+    CHECK(headphones_select(&snapshot, NULL) == NULL);
+    CHECK(headphones_progress(0) == 0);
+    CHECK(headphones_progress(80) == 0.8);
+    CHECK(headphones_progress(100) == 1);
+    CHECK(headphones_progress(-1) == -1);
+    CHECK(headphones_progress(101) == -1);
+}
+
 int main(void) {
     test_battery();
     test_changes();
     test_details();
+    test_selection();
     printf("%u headphone checks passed; no GUI or device changes\n", checks);
     return 0;
 }

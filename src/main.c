@@ -121,6 +121,14 @@ void app_summary(const App *app, wchar_t *text, size_t count) {
                  app->island.timer.paused ? L"Paused" : L"Running");
         return;
     }
+    const HeadphoneDevice *headphones = app_headphones(app);
+    if (headphones) {
+        wchar_t detail[160];
+        headphones_detail(headphones, app->config.headphone_battery, detail, 160);
+        swprintf(text, count, L"DynamicWindows. %ls. %ls. Click for system controls.",
+                 headphones->name, detail);
+        return;
+    }
     wchar_t idle[256];
     app_idle_label(app, idle, 256);
     swprintf(text, count, L"DynamicWindows. %ls. Click to expand. Right-click for settings.", idle);
@@ -208,11 +216,19 @@ IslandActivity app_secondary(const App *app) {
     return island_secondary(&island);
 }
 
+const HeadphoneDevice *app_headphones(const App *app) {
+    return app->config.headphone_status
+               ? headphones_select(&app->headphones, app->platform.device_id)
+               : NULL;
+}
+
 IslandSize app_target_size(const App *app) {
     const AppConfig *config = &app->config;
     if (app->island.expanded)
         return (IslandSize){config->expanded_width, config->expanded_height,
                             config->expanded_radius, 0};
+    if (app->island.alert == ALERT_HEADPHONES)
+        return (IslandSize){config->alert_width, config->alert_height, config->alert_height / 2, 0};
     if (app->island.alert != ALERT_NONE)
         return (IslandSize){config->alert_width, config->alert_height,
                             fmin(config->alert_height / 2, config->compact_radius), 0};
@@ -222,6 +238,9 @@ IslandSize app_target_size(const App *app) {
                                                : config->idle_width;
     double bubble =
         config->dual_activity && app_secondary(app) != ACTIVITY_NONE ? config->bubble_size : 0;
+    const HeadphoneDevice *headphones = app_headphones(app);
+    if (headphones && primary != ACTIVITY_NONE)
+        width += 64;
     double height = primary == ACTIVITY_TIMER ? config->timer_height : config->compact_height;
     return (IslandSize){width, height, fmin(config->compact_radius, height / 2), bubble};
 }
@@ -515,7 +534,13 @@ void app_action(App *app, Action action, double value) {
             app_close(app);
             return;
         }
-        app_open(app, app_primary(app) == ACTIVITY_TIMER ? ISLAND_TIMER : ISLAND_MEDIA, true);
+        app_open(app,
+                 app->island.alert == ALERT_HEADPHONES ||
+                         (app_primary(app) == ACTIVITY_NONE && app_headphones(app))
+                     ? ISLAND_SYSTEM
+                 : app_primary(app) == ACTIVITY_TIMER ? ISLAND_TIMER
+                                                      : ISLAND_MEDIA,
+                 true);
         return;
     case ACTION_SECONDARY:
         app_open(app, app_secondary(app) == ACTIVITY_TIMER ? ISLAND_TIMER : ISLAND_MEDIA, true);
@@ -526,6 +551,10 @@ void app_action(App *app, Action action, double value) {
     case ACTION_TAB_MEDIA:
     case ACTION_TAB_TIMER:
     case ACTION_TAB_SYSTEM:
+        if (!app->island.expanded) {
+            app_open(app, (IslandView)(action - ACTION_TAB_MEDIA), true);
+            return;
+        }
         app->hover_open = false;
         island_open(&app->island, (IslandView)(action - ACTION_TAB_MEDIA));
         app->focus = -1;
@@ -793,7 +822,11 @@ static void pointer_state(App *app, uint64_t now) {
         if (!preview && app->hover_enabled && !app->hover_blocked && !app->island.expanded &&
             app->island.alert == ALERT_NONE &&
             now - app->pointer_entered >= (uint64_t)app->config.hover_delay) {
-            app_open(app, app_primary(app) == ACTIVITY_TIMER ? ISLAND_TIMER : ISLAND_MEDIA, false);
+            app_open(app,
+                     app_primary(app) == ACTIVITY_TIMER                         ? ISLAND_TIMER
+                     : app_primary(app) == ACTIVITY_NONE && app_headphones(app) ? ISLAND_SYSTEM
+                                                                                : ISLAND_MEDIA,
+                     false);
             tooltip_hide(app);
         } else if (hit >= 0 && now - app->hover_started >= 350) {
             tooltip_show(app, &app->hits[hit]);
@@ -824,8 +857,7 @@ static void headphones_receive(App *app, HeadphoneSnapshot *snapshot) {
     app->headphones = *snapshot;
     free(snapshot);
     for (unsigned i = 0; i < count; ++i) {
-        if (!app->config.headphone_alerts ||
-            (events[i].change == HEADPHONE_BATTERY && !app->config.headphone_battery))
+        if (!app->config.headphone_alerts || events[i].change == HEADPHONE_BATTERY)
             continue;
         uint64_t now = GetTickCount64();
         island_show_alert(&app->island, ALERT_HEADPHONES, now);
@@ -919,8 +951,8 @@ static void frame(App *app) {
     for (int i = 0; i < 5; ++i)
         app->wave_levels[i] += (app->peaks[i * 2] - app->wave_levels[i]) * smooth;
     bool idle_hidden = app->config.idle == IDLE_HIDDEN && app_primary(app) == ACTIVITY_NONE &&
-                       app->island.alert == ALERT_NONE && !app->island.expanded &&
-                       !settings_is_preview(app);
+                       !app_headphones(app) && app->island.alert == ALERT_NONE &&
+                       !app->island.expanded && !settings_is_preview(app);
     bool event_visible = now < app->event_until;
     bool visible = !app->fullscreen_hidden && ((!app->hidden && !idle_hidden) || event_visible);
     moving |= island_spring_tuned(&app->visibility, visible ? 1 : 0, seconds, app->reduced_motion,
@@ -1398,6 +1430,27 @@ static int smoke_test(App *app, const wchar_t *directory) {
     if (attributes == INVALID_FILE_ATTRIBUTES || !(attributes & FILE_ATTRIBUTE_DIRECTORY))
         return 1;
     bool passed = smoke_frame(app, directory, L"idle");
+    app->headphones = (HeadphoneSnapshot){.initialized = true, .count = 1};
+    app->headphones.devices[0] =
+        (HeadphoneDevice){.bluetooth = true, .headphones = true, .battery_percent = 80};
+    wcscpy(app->headphones.devices[0].id, L"synthetic-earbuds");
+    wcscpy(app->headphones.devices[0].name, L"Wireless earbuds");
+    passed &= smoke_frame(app, directory, L"headphones-idle");
+    passed &= app_target_size(app).width == app->config.idle_width;
+    passed &= app_target_size(app).height == app->config.compact_height;
+    app->headphone_event = (HeadphoneEvent){HEADPHONE_CONNECTED, app->headphones.devices[0]};
+    island_show_alert(&app->island, ALERT_HEADPHONES, 0);
+    passed &= smoke_frame(app, directory, L"headphones-connected");
+    passed &= app_target_size(app).radius == app->config.alert_height / 2;
+    app->headphone_event.device.battery_percent = -1;
+    passed &= smoke_frame(app, directory, L"headphones-battery-unavailable");
+    app->headphones.devices[0].battery_percent = 0;
+    app->island.alert = ALERT_NONE;
+    passed &= smoke_frame(app, directory, L"headphones-battery-empty");
+    app->config.headphone_status = false;
+    passed &= smoke_frame(app, directory, L"headphones-status-disabled");
+    app->config.headphone_status = true;
+    app->headphones.count = 0;
     island_open(&app->island, ISLAND_MEDIA);
     passed &= smoke_frame(app, directory, L"media-empty");
     app->media = (MediaSnapshot){.initialized = true,
@@ -1496,7 +1549,7 @@ static int smoke_test(App *app, const wchar_t *directory) {
     swprintf(path, 1024, L"%ls/result.txt", directory);
     report = _wfopen(path, L"w");
     if (report) {
-        fprintf(report, "%s: 13 native render states, alpha hit-testing, MSAA names and roles\n",
+        fprintf(report, "%s: 18 native render states, alpha hit-testing, MSAA names and roles\n",
                 passed ? "PASS" : "FAIL");
         fclose(report);
     } else {

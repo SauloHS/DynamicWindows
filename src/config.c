@@ -68,6 +68,7 @@ void config_defaults(AppConfig *config) {
                           .media_extra_width = 36,
                           .artwork_background = true,
                           .headphone_alerts = true,
+                          .headphone_status = true,
                           .headphone_battery = true,
                           .headphone_alert_ms = 4000};
     config->shortcuts[SHORTCUT_ISLAND] = (ShortcutBinding){'D', MOD_CONTROL | MOD_ALT};
@@ -222,6 +223,7 @@ static bool write_number(const wchar_t *path, const wchar_t *name, double value)
     X(media_extra_width)                                                                           \
     X(artwork_background)                                                                          \
     X(headphone_alerts)                                                                            \
+    X(headphone_status)                                                                            \
     X(headphone_battery)                                                                           \
     X(headphone_alert_ms)
 
@@ -472,6 +474,10 @@ bool config_save(const AppConfig *input, const wchar_t *path) {
 double config_reference_width(const AppConfig *config) {
     double media = fmax(config->media_width, config->idle_width + config->media_extra_width);
     double compact = fmax(config->idle_width, fmax(media, config->timer_width));
+    if (config->headphone_status)
+        compact =
+            fmax(compact,
+                 fmax(config->idle_width + config->media_extra_width, config->timer_width) + 64);
     return fmax(config->expanded_width,
                 fmax(compact + config->bubble_gap + config->bubble_size, config->alert_width));
 }

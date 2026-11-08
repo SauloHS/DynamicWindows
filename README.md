@@ -93,11 +93,13 @@ Full-screen suppression takes priority. Clicking a temporary preview explicitly 
 
 ### Headphones and Bluetooth
 
-Connecting or disconnecting headphones briefly shows the device name on the island. Bluetooth audio includes a battery percentage when its Windows driver publishes one. Missing battery data is shown as **unavailable**, not zero or an estimate. Windows can expose some Bluetooth speakers through the same audio endpoint path.
+Connecting headphones shows an original earbud illustration, a small connection label above the device name, and a circular Bluetooth battery meter. After the preview, the compact pill keeps the earbud icon on the left and the battery ring on the right. During media or timer activity, headphone status shares the pill without hiding those controls.
 
-Detection follows active Windows audio endpoints and matches Bluetooth device properties by physical container identity, not by a guessed device name. Wired jack detection depends on the audio driver exposing headphone/headset state. The first scan establishes a baseline without replaying existing connections. Battery changes also produce a brief update when enabled.
+Bluetooth audio includes a percentage only when its Windows driver publishes one. Missing battery data uses a neutral ring and `?` in the larger preview, never a fabricated zero. Windows can expose some Bluetooth speakers through the same audio endpoint path. The earbud SVG is original artwork embedded in the executable, not an Apple asset.
 
-Use **Behavior → Headphones and Bluetooth** to control alerts, battery visibility, and alert duration. The System panel keeps connected device information available. All device discovery runs on a worker; no pairing, drivers, microphone capture, or network access is needed.
+Detection follows active Windows audio endpoints and matches Bluetooth device properties by physical container identity, not by a guessed device name. Wired jack detection depends on the audio driver exposing headphone/headset state. The first scan establishes a baseline without replaying existing connections. Battery changes update the compact ring silently.
+
+Use **Behavior → Headphones and Bluetooth** to control alerts, persistent compact status, battery visibility, and alert duration. The System panel keeps connected device information available. All device discovery runs on a worker; no pairing, drivers, microphone capture, or network access is needed.
 
 ### Timers and system activity
 

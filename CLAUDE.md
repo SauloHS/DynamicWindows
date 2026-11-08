@@ -115,7 +115,7 @@ GUI automation must be DPI-aware. For cross-process edit controls, use direct **
 
 Headphone discovery enumerates active render endpoints on its own MTA worker. Match Bluetooth PnP nodes using the physical container GUID, never friendly-name guesses. Windows' reported battery property is optional; validate type, size, and 0–100 range, with `-1` meaning unavailable. Wired headphone jack detection depends on driver form-factor/state reporting. The first successful snapshot is a baseline, not a burst of connection alerts. Do not count a transient acquisition failure as a disconnect. Drain posted snapshots after stopping the worker.
 
-The `headphones` CTest target is headless and uses synthetic snapshots. Honor a user request not to execute any tests; compilation is not a runtime pass.
+The `headphones` CTest target is headless and uses synthetic snapshots. The original `assets/earbuds.svg` is embedded as RCDATA 101 and loaded once into GDI+ paths; this small loader supports only the absolute M/L/C/Z commands used by our own asset, not arbitrary SVG input. Persistent headphone status preserves idle height/radius and shares compact media/timer space. Connection previews use a pill radius and a numeric battery ring; unknown battery must not look like zero. Honor a user request not to execute any tests; compilation is not a runtime pass.
 
 ### Configuration transactions
 

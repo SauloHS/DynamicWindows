@@ -45,6 +45,24 @@ bool headphones_same(const HeadphoneDevice *first, const HeadphoneDevice *second
     return *first->id && *second->id && _wcsicmp(first->id, second->id) == 0;
 }
 
+const HeadphoneDevice *headphones_select(const HeadphoneSnapshot *snapshot,
+                                         const wchar_t *output_id) {
+    const HeadphoneDevice *selected = NULL;
+    for (unsigned i = 0; i < snapshot->count && i < HEADPHONES_LIMIT; ++i) {
+        const HeadphoneDevice *device = &snapshot->devices[i];
+        if (output_id && *output_id && _wcsicmp(device->id, output_id) == 0)
+            return device;
+        if (!selected || (device->bluetooth && !selected->bluetooth) ||
+            (device->bluetooth && device->battery_percent >= 0 && selected->battery_percent < 0))
+            selected = device;
+    }
+    return selected;
+}
+
+double headphones_progress(int battery_percent) {
+    return battery_percent >= 0 && battery_percent <= 100 ? battery_percent / 100.0 : -1;
+}
+
 static bool find_device(const HeadphoneSnapshot *snapshot, const HeadphoneDevice *device,
                         HeadphoneDevice *match) {
     for (unsigned i = 0; i < snapshot->count && i < HEADPHONES_LIMIT; ++i) {
