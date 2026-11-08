@@ -36,7 +36,9 @@ static void test_defaults(void) {
     CHECK(!config.crab_enabled);
     CHECK(config.crab_speak);
     CHECK(wcscmp(config.crab_name, L"Crab") == 0);
-    CHECK(wcscmp(config.crab_model, L"claude-opus-5-5") == 0);
+    CHECK(config.crab_provider == CRAB_PROVIDER_NONE);
+    CHECK(!*config.crab_base_url);
+    CHECK(!*config.crab_model);
     CHECK(config_shortcuts_valid(&config));
     config.crab_shortcut = config.shortcuts[SHORTCUT_SEARCH];
     CHECK(!config_shortcuts_valid(&config));
@@ -120,9 +122,9 @@ static void test_placement(void) {
     config.timer_width = 1000;
     config_canvas(&config, &width, &height);
     CHECK(width > 1200);
-    CHECK(config_reference_width(&config) == 1113);
+    CHECK(config_reference_width(&config) == 1105);
     config.timer_height = 120;
-    CHECK(config_reference_width(&config) == 1160);
+    CHECK(config_reference_width(&config) == 1180);
 }
 
 static void test_persistence(void) {
@@ -149,8 +151,10 @@ static void test_persistence(void) {
     saved.notification_content = false;
     saved.notifications_enabled = true;
     saved.notification_alert_ms = 6400;
+    saved.crab_provider = CRAB_PROVIDER_OPENAI_COMPATIBLE;
+    wcscpy(saved.crab_base_url, L"http://127.0.0.1:11434/v1");
     wcscpy(saved.crab_name, L"Siri");
-    wcscpy(saved.crab_model, L"claude-opus-5-5");
+    wcscpy(saved.crab_model, L"llama3.2");
     saved.crab_enabled = true;
     saved.crab_speak = false;
     saved.crab_shortcut = (ShortcutBinding){'K', MOD_CONTROL | MOD_ALT};
@@ -170,8 +174,10 @@ static void test_persistence(void) {
     CHECK(loaded.notification_alert_ms == 6400);
     CHECK(loaded.crab_enabled);
     CHECK(!loaded.crab_speak);
+    CHECK(loaded.crab_provider == CRAB_PROVIDER_OPENAI_COMPATIBLE);
+    CHECK(wcscmp(loaded.crab_base_url, L"http://127.0.0.1:11434/v1") == 0);
     CHECK(wcscmp(loaded.crab_name, L"Siri") == 0);
-    CHECK(wcscmp(loaded.crab_model, L"claude-opus-5-5") == 0);
+    CHECK(wcscmp(loaded.crab_model, L"llama3.2") == 0);
     CHECK(loaded.crab_shortcut.key == 'K');
     CHECK(loaded.crab_shortcut.modifiers == (MOD_CONTROL | MOD_ALT));
     CHECK(loaded.colors[TINT_ACCENT] == saved.colors[TINT_ACCENT]);
@@ -182,6 +188,15 @@ static void test_persistence(void) {
     CHECK(!loaded.headphone_status);
     CHECK(!loaded.headphone_battery);
     CHECK(loaded.headphone_alert_ms == 7500);
+    wchar_t legacy_path[MAX_PATH];
+    CHECK(GetTempFileNameW(directory, L"dwc", 0, legacy_path) != 0);
+    CHECK(WritePrivateProfileStringW(L"DynamicWindows", L"version", L"1.0000", legacy_path));
+    CHECK(WritePrivateProfileStringW(L"DynamicWindows", L"crab_model", L"claude-opus-5-5",
+                                     legacy_path));
+    CHECK(config_load(&loaded, legacy_path));
+    CHECK(loaded.crab_provider == CRAB_PROVIDER_ANTHROPIC);
+    CHECK(wcscmp(loaded.crab_base_url, L"https://api.anthropic.com") == 0);
+    CHECK(DeleteFileW(legacy_path));
     CHECK(WritePrivateProfileStringW(L"DynamicWindows", L"idle_width", L"nan", path));
     CHECK(WritePrivateProfileStringW(L"DynamicWindows", L"frame_rate", L"99999999999999999", path));
     CHECK(WritePrivateProfileStringW(L"DynamicWindows", L"opacity", L"garbage", path));

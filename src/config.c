@@ -73,6 +73,7 @@ void config_defaults(AppConfig *config) {
                           .headphone_alert_ms = 4000,
                           .notification_content = true,
                           .notification_alert_ms = 5000,
+                          .crab_provider = CRAB_PROVIDER_NONE,
                           .crab_speak = true};
     config->crab_shortcut = (ShortcutBinding){VK_SPACE, MOD_CONTROL | MOD_ALT};
     config->shortcuts[SHORTCUT_ISLAND] = (ShortcutBinding){'D', MOD_CONTROL | MOD_ALT};
@@ -94,7 +95,6 @@ void config_defaults(AppConfig *config) {
     wcscpy(config->idle_text, L"DynamicWindows");
     wcscpy(config->idle_font, L"Segoe UI");
     wcscpy(config->crab_name, L"Crab");
-    wcscpy(config->crab_model, L"claude-opus-5-5");
 }
 
 static void trim_text(wchar_t *text) {
@@ -117,17 +117,24 @@ void config_normalize(AppConfig *config) {
     config->idle = (IdleContent)integer_clamp((int)config->idle, IDLE_CLOCK, IDLE_HIDDEN);
     config->idle_text[127] = L'\0';
     config->idle_font[31] = L'\0';
+    config->crab_provider = (CrabProvider)integer_clamp(
+        (int)config->crab_provider, CRAB_PROVIDER_NONE, CRAB_PROVIDER_OPENAI_COMPATIBLE);
     config->crab_name[63] = L'\0';
+    config->crab_base_url[511] = L'\0';
     config->crab_model[95] = L'\0';
     config->monitor[31] = L'\0';
     if (!*config->idle_font)
         wcscpy(config->idle_font, L"Segoe UI");
     trim_text(config->crab_name);
+    trim_text(config->crab_base_url);
     trim_text(config->crab_model);
     if (!*config->crab_name)
         wcscpy(config->crab_name, L"Crab");
-    if (!*config->crab_model)
-        wcscpy(config->crab_model, L"claude-opus-5-5");
+    if (config->crab_provider == CRAB_PROVIDER_ANTHROPIC && !*config->crab_base_url)
+        wcscpy(config->crab_base_url, L"https://api.anthropic.com");
+    if (config->crab_provider != CRAB_PROVIDER_NONE && !*config->crab_base_url)
+        config->crab_provider = CRAB_PROVIDER_NONE;
+
     for (int i = 0; i < 127 && config->idle_text[i]; ++i)
         if (config->idle_text[i] < L' ')
             config->idle_text[i] = L' ';
@@ -263,7 +270,8 @@ static bool write_number(const wchar_t *path, const wchar_t *name, double value)
     X(notification_content)                                                                        \
     X(notification_alert_ms)                                                                       \
     X(crab_enabled)                                                                                \
-    X(crab_speak)
+    X(crab_speak)                                                                                  \
+    X(crab_provider)
 
 typedef struct {
     const wchar_t *name;
@@ -419,6 +427,9 @@ bool config_load(AppConfig *config, const wchar_t *path) {
     const wchar_t *section =
         GetPrivateProfileStringW(INI_SECTION, L"version", L"", version, 32, path) ? INI_SECTION
                                                                                   : L"MacNotch";
+    wchar_t provider_value[32];
+    bool crab_provider_present =
+        GetPrivateProfileStringW(section, L"crab_provider", L"", provider_value, 32, path) != 0;
     config->idle = (IdleContent)read_number(path, section, L"idle", config->idle);
 #define LOAD(field) config->field = read_number(path, section, CONFIG_KEY(field), config->field);
     NUMBER_FIELDS(LOAD)
@@ -430,8 +441,15 @@ bool config_load(AppConfig *config, const wchar_t *path) {
     GetPrivateProfileStringW(section, L"idle_font", config->idle_font, config->idle_font, 32, path);
     GetPrivateProfileStringW(section, L"monitor", L"", config->monitor, 32, path);
     GetPrivateProfileStringW(section, L"crab_name", config->crab_name, config->crab_name, 64, path);
+    GetPrivateProfileStringW(section, L"crab_base_url", config->crab_base_url,
+                             config->crab_base_url, 512, path);
     GetPrivateProfileStringW(section, L"crab_model", config->crab_model, config->crab_model, 96,
                              path);
+    if (!crab_provider_present && *config->crab_model) {
+        config->crab_provider = CRAB_PROVIDER_ANTHROPIC;
+        if (!*config->crab_base_url)
+            wcscpy(config->crab_base_url, L"https://api.anthropic.com");
+    }
     for (int i = 0; i < TINT_COUNT; ++i) {
         wchar_t key[32];
         wchar_t value[32];
@@ -462,7 +480,16 @@ bool config_load(AppConfig *config, const wchar_t *path) {
     if (!config_shortcuts_valid(config)) {
         AppConfig defaults;
         config_defaults(&defaults);
-        memcpy(config->shortcuts, defaults.shortcuts, sizeof(config->shortcuts));
+        if (config->crab_shortcut.key) {
+            for (int i = 0; i < SHORTCUT_GLOBAL_COUNT; ++i)
+                if (config->shortcuts[i].key == config->crab_shortcut.key &&
+                    config->shortcuts[i].modifiers == config->crab_shortcut.modifiers)
+                    config->crab_shortcut = (ShortcutBinding){0};
+        }
+        if (!config_shortcuts_valid(config)) {
+            memcpy(config->shortcuts, defaults.shortcuts, sizeof(config->shortcuts));
+            config->crab_shortcut = defaults.crab_shortcut;
+        }
     }
     config_normalize(config);
     return true;
@@ -509,6 +536,9 @@ bool config_save(const AppConfig *input, const wchar_t *path) {
     saved = WritePrivateProfileStringW(INI_SECTION, L"monitor", config.monitor, temporary) && saved;
     saved =
         WritePrivateProfileStringW(INI_SECTION, L"crab_name", config.crab_name, temporary) && saved;
+    saved = WritePrivateProfileStringW(INI_SECTION, L"crab_base_url", config.crab_base_url,
+                                       temporary) &&
+            saved;
     saved = WritePrivateProfileStringW(INI_SECTION, L"crab_model", config.crab_model, temporary) &&
             saved;
     for (int i = 0; i < TINT_COUNT; ++i) {

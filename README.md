@@ -110,11 +110,11 @@ Allowed toast notifications briefly appear on the island and remain available in
 
 ### Crab voice assistant
 
-Crab is an **opt-in** native voice assistant. Enable it in **Crab**, connect an Anthropic API key, then press **Ctrl + Alt + Space** and say the configured wake name followed by a question—for example, “Crab, what’s 1 + 1?” Change the wake name to “Siri” or another phrase if preferred.
+Crab is an **opt-in** native voice assistant. Enable it in **Crab**, choose an API format, set a base URL and model, then connect an API key when the endpoint requires one. Press **Ctrl + Alt + Space** and say the configured wake name followed by a question—for example, “Crab, what’s 1 + 1?” Change the wake name to “Siri” or another phrase if preferred.
 
-Activation morphs the island into an original liquid-glass orb. Cyan, violet, and magenta layers distinguish listening, thinking, and speaking without relying on text; reduced motion uses a stable glass state. Windows Speech Recognition performs local transcription, Anthropic’s Messages API generates the answer with `claude-opus-5-5` by default, and Windows text-to-speech can read it aloud.
+Activation morphs the island into an original liquid-glass orb. Cyan, violet, and magenta layers distinguish listening, thinking, and speaking without relying on text; reduced motion uses a stable glass state. Windows Speech Recognition performs local transcription. Crab supports **Anthropic Messages** and **OpenAI-compatible Chat Completions** endpoints, including local Ollama-style servers. Windows text-to-speech can read answers aloud.
 
-The API key is stored in **Windows Credential Manager**, never `settings.ini`. Crab sends only the recognized question to `api.anthropic.com` after activation. It has no OS-control tools and cannot claim to have performed actions. Microphone capture starts only from the Crab shortcut, not continuously in the background. Press the shortcut again or click the orb to cancel.
+The API key is stored in **Windows Credential Manager**, never `settings.ini`, and isolated by API format plus normalized base URL. Crab sends only the recognized question to the configured endpoint after activation. HTTPS is required for remote endpoints; plain HTTP is accepted only for `localhost`, `127.0.0.1`, or `::1`. It has no OS-control tools and cannot claim to have performed actions. Microphone capture starts only from the Crab shortcut, not continuously in the background. Press the shortcut again or click the orb to cancel.
 
 ### Timers and system activity
 
@@ -175,9 +175,9 @@ MSIX installation requires a trusted code-signing certificate. Pass its exact su
 
 ## Privacy, honestly
 
-- No background app network requests, telemetry, accounts, or cloud configuration. Crab contacts Anthropic only after explicit activation.
+- No background app network requests, telemetry, accounts, or cloud configuration. Crab contacts only the configured provider endpoint after explicit activation.
 - No continuous microphone capture, audio recording, camera access, or screen recording.
-- Crab uses the microphone only after explicit shortcut activation and sends the recognized question to Anthropic when enabled.
+- Crab uses the microphone only after explicit shortcut activation and sends the recognized question to the configured provider when enabled.
 - No notification access unless explicitly enabled and granted by Windows.
 - Media metadata comes from **Windows GSMTC**. The waveform uses an audio-output peak meter.
 - An outside-click listener is active for manually opened controls; it closes the island without swallowing the click.

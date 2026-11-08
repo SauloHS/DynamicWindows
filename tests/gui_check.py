@@ -394,6 +394,8 @@ def check_settings(executable, output):
             assert settings_control(settings, 1952), "Crab wake-name control missing"
             assert settings_control(settings, 1954), "Crab API-key control missing"
             assert settings_control(settings, 1956), "Crab status control missing"
+            assert settings_control(settings, 1958), "Crab provider control missing"
+            assert settings_control(settings, 1959), "Crab base URL control missing"
             capture(settings, output / "settings-crab.png")
             user32.SendMessageW(settings_control(settings, 1001), 0x00f5, 0, 0)
             wait_until(config.exists)

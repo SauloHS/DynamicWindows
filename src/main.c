@@ -408,8 +408,8 @@ bool app_apply_config(App *app, const AppConfig *input, bool persist) {
     }
     app->hover_enabled = config.hover_expand;
     app->quiet_fullscreen = config.hide_fullscreen;
-    crab_configure(&app->crab_service, config.crab_enabled, config.crab_speak, config.crab_name,
-                   config.crab_model);
+    crab_configure(&app->crab_service, config.crab_enabled, config.crab_speak, config.crab_provider,
+                   config.crab_name, config.crab_base_url, config.crab_model);
     notifications_configure(&app->notification_service, app->window, config.notifications_enabled,
                             config.notification_content);
     app->motion_allowed = !config.reduced_motion;
@@ -702,7 +702,20 @@ void app_action(App *app, Action action, double value) {
             settings_show(app);
             return;
         }
-        if (!crab_key_exists()) {
+        if (app->config.crab_provider == CRAB_PROVIDER_NONE || !*app->config.crab_base_url ||
+            !*app->config.crab_model) {
+            wcscpy(app->notice, L"Choose Crab's API format, base URL, and model in Settings.");
+            settings_show(app);
+            return;
+        }
+        CrabEndpoint crab_endpoint;
+        if (!crab_endpoint_parse(app->config.crab_provider, app->config.crab_base_url,
+                                 &crab_endpoint)) {
+            wcscpy(app->notice, L"Crab's base URL is invalid or insecure.");
+            settings_show(app);
+            return;
+        }
+        if (!crab_key_exists(app->config.crab_provider, app->config.crab_base_url)) {
             wcscpy(app->notice, L"Connect an Anthropic API key in Crab settings.");
             settings_show(app);
             return;
@@ -1833,7 +1846,8 @@ static bool create_app(App *app, const Options *options) {
     if (!headphones_start(&app->headphone_service, app->window))
         app->headphones = (HeadphoneSnapshot){.initialized = true, .error = E_FAIL};
     if (!crab_start(&app->crab_service, app->window, app->config.crab_enabled,
-                    app->config.crab_speak, app->config.crab_name, app->config.crab_model)) {
+                    app->config.crab_speak, app->config.crab_provider, app->config.crab_name,
+                    app->config.crab_base_url, app->config.crab_model)) {
         app->crab_state = CRAB_ERROR;
         app->crab_error = E_FAIL;
     } else {

@@ -24,6 +24,7 @@ typedef enum {
     FIELD_IDLE,
     FIELD_ANCHOR,
     FIELD_MONITOR,
+    FIELD_PROVIDER,
     FIELD_COLOR,
     FIELD_SHORTCUT,
     FIELD_BUTTON,
@@ -294,11 +295,20 @@ static const SettingsField fields[] = {
             L"Use the installed Windows text-to-speech voice.", NULL),
     STRING(ID_SETTINGS_CRAB_NAME, PAGE_CRAB, FIELD_TEXT, crab_name, 63, L"Wake name",
            L"Say this name first, followed by the question. Up to 63 characters.", L"Activation"),
-    STRING(ID_SETTINGS_CRAB_MODEL, PAGE_CRAB, FIELD_TEXT, crab_model, 95, L"Claude model",
-           L"Anthropic model ID. Default: claude-opus-5-5.", NULL),
+    CHOICE(ID_SETTINGS_CRAB_PROVIDER, PAGE_CRAB, FIELD_PROVIDER, crab_provider,
+           CRAB_PROVIDER_OPENAI_COMPATIBLE, L"API format",
+           L"Choose No provider, Anthropic Messages, or OpenAI-compatible Chat Completions.",
+           L"Provider"),
+    STRING(ID_SETTINGS_CRAB_BASE_URL, PAGE_CRAB, FIELD_TEXT, crab_base_url, 511, L"Base URL",
+           L"Examples: https://api.anthropic.com, https://api.openai.com/v1, or "
+           L"http://127.0.0.1:11434/v1.",
+           NULL),
+    STRING(ID_SETTINGS_CRAB_MODEL, PAGE_CRAB, FIELD_TEXT, crab_model, 95, L"Model",
+           L"Provider model ID, for example gpt-4.1-mini or llama3.2.", NULL),
     BUTTON(PAGE_CRAB, ID_SETTINGS_CRAB_KEY, L"Connect API key",
-           L"Stores the key in Windows Credential Manager, never settings.ini.",
-           L"Anthropic connection"),
+           L"Stores a key for this provider and base URL in Windows Credential Manager. Local "
+           L"servers may leave it empty.",
+           L"Connection"),
     BUTTON(PAGE_CRAB, ID_SETTINGS_CRAB_DELETE_KEY, L"Remove API key",
            L"Deletes Crab's credential from Windows Credential Manager.", NULL),
     STATUS(PAGE_CRAB, ID_SETTINGS_CRAB_STATUS, L"Connection status",
@@ -321,6 +331,8 @@ static const wchar_t *const page_names[] = {L"Idle",     L"Layout",    L"Appeara
                                             L"Behavior", L"Shortcuts", L"Notifications", L"Crab"};
 static const wchar_t *const idle_choices[] = {
     L"Clock", L"Date", L"Clock + date", L"Custom text", L"Battery", L"Volume", L"Blank", L"Hidden"};
+static const wchar_t *const provider_choices[] = {L"No provider", L"Anthropic Messages",
+                                                  L"OpenAI-compatible Chat Completions"};
 static const wchar_t *const anchor_choices[] = {L"Top left",    L"Top center",    L"Top right",
                                                 L"Middle left", L"Center",        L"Middle right",
                                                 L"Bottom left", L"Bottom center", L"Bottom right"};
@@ -437,9 +449,16 @@ static void crab_status(SettingsState *state) {
     if (index == COUNT_OF(fields))
         return;
     wchar_t text[256];
-    swprintf(text, COUNT_OF(text),
-             crab_key_exists() ? L"API key connected. %ls." : L"No API key connected. %ls.",
-             crab_state_text(state->app->crab_state));
+    CrabProvider provider = state->draft.crab_provider;
+    const wchar_t *base_url = state->draft.crab_base_url;
+    if (provider == CRAB_PROVIDER_NONE)
+        swprintf(text, COUNT_OF(text), L"No provider selected. %ls.",
+                 crab_state_text(state->app->crab_state));
+    else
+        swprintf(text, COUNT_OF(text),
+                 crab_key_exists(provider, base_url) ? L"API key connected for %ls. %ls."
+                                                     : L"No API key for %ls. %ls.",
+                 crab_provider_text(provider), crab_state_text(state->app->crab_state));
     SetWindowTextW(state->controls[index].control, text);
 }
 
@@ -582,6 +601,7 @@ static bool create_field(SettingsState *state, size_t index) {
     case FIELD_IDLE:
     case FIELD_ANCHOR:
     case FIELD_MONITOR:
+    case FIELD_PROVIDER:
         class_name = WC_COMBOBOXW;
         style |= CBS_DROPDOWNLIST | WS_VSCROLL;
         extended = 0;
@@ -604,9 +624,7 @@ static bool create_field(SettingsState *state, size_t index) {
     if (field->kind == FIELD_STATUS) {
         wchar_t status[256];
         if (field->id == ID_SETTINGS_CRAB_STATUS)
-            swprintf(status, COUNT_OF(status),
-                     crab_key_exists() ? L"API key connected. %ls." : L"No API key connected. %ls.",
-                     crab_state_text(state->app->crab_state));
+            swprintf(status, COUNT_OF(status), L"Crab provider status loads with the draft.");
         else
             notifications_status(&state->app->notification_service, status, COUNT_OF(status));
         SetWindowTextW(control->control, status);
@@ -616,10 +634,14 @@ static bool create_field(SettingsState *state, size_t index) {
         for (size_t i = 0; i < COUNT_OF(fonts); ++i)
             SendMessageW(control->control, CB_ADDSTRING, 0, (LPARAM)fonts[i]);
         SendMessageW(control->control, CB_LIMITTEXT, 31, 0);
-    } else if (field->kind == FIELD_IDLE || field->kind == FIELD_ANCHOR) {
-        const wchar_t *const *choices = field->kind == FIELD_IDLE ? idle_choices : anchor_choices;
-        size_t count =
-            field->kind == FIELD_IDLE ? COUNT_OF(idle_choices) : COUNT_OF(anchor_choices);
+    } else if (field->kind == FIELD_IDLE || field->kind == FIELD_ANCHOR ||
+               field->kind == FIELD_PROVIDER) {
+        const wchar_t *const *choices = field->kind == FIELD_IDLE     ? idle_choices
+                                        : field->kind == FIELD_ANCHOR ? anchor_choices
+                                                                      : provider_choices;
+        size_t count = field->kind == FIELD_IDLE     ? COUNT_OF(idle_choices)
+                       : field->kind == FIELD_ANCHOR ? COUNT_OF(anchor_choices)
+                                                     : COUNT_OF(provider_choices);
         for (size_t i = 0; i < count; ++i)
             SendMessageW(control->control, CB_ADDSTRING, 0, (LPARAM)choices[i]);
     } else if (field->kind == FIELD_TEXT || field->kind == FIELD_SHORTCUT) {
@@ -744,20 +766,15 @@ static void fill_form(SettingsState *state, const AppConfig *config) {
         const SettingsField *field = &fields[i];
         HWND control = state->controls[i].control;
         const unsigned char *value = (const unsigned char *)config + field->offset;
-        wchar_t text[160];
+        wchar_t text[600];
         switch (field->kind) {
-        case FIELD_STATUS: {
-            wchar_t status[256];
-            if (field->id == ID_SETTINGS_CRAB_STATUS)
-                swprintf(status, COUNT_OF(status),
-                         crab_key_exists() ? L"API key connected. %ls."
-                                           : L"No API key connected. %ls.",
-                         crab_state_text(state->app->crab_state));
-            else
+        case FIELD_STATUS:
+            if (field->id != ID_SETTINGS_CRAB_STATUS) {
+                wchar_t status[256];
                 notifications_status(&state->app->notification_service, status, COUNT_OF(status));
-            SetWindowTextW(control, status);
+                SetWindowTextW(control, status);
+            }
             break;
-        }
         case FIELD_BUTTON:
             break;
         case FIELD_BOOLEAN:
@@ -766,6 +783,9 @@ static void fill_form(SettingsState *state, const AppConfig *config) {
             break;
         case FIELD_IDLE:
             SendMessageW(control, CB_SETCURSEL, *(const IdleContent *)value, 0);
+            break;
+        case FIELD_PROVIDER:
+            SendMessageW(control, CB_SETCURSEL, *(const CrabProvider *)value, 0);
             break;
         case FIELD_ANCHOR:
             SendMessageW(control, CB_SETCURSEL, *(const int *)value, 0);
@@ -795,7 +815,9 @@ static void fill_form(SettingsState *state, const AppConfig *config) {
             break;
         }
     }
+    state->draft = *config;
     state->loading = false;
+    crab_status(state);
     memset(state->content_width, 0, sizeof(state->content_width));
 }
 
@@ -856,7 +878,7 @@ static bool read_field(SettingsState *state, size_t index, AppConfig *config) {
     const SettingsField *field = &fields[index];
     HWND control = state->controls[index].control;
     unsigned char *destination = (unsigned char *)config + field->offset;
-    wchar_t text[160];
+    wchar_t text[600];
     switch (field->kind) {
     case FIELD_BUTTON:
     case FIELD_STATUS:
@@ -865,12 +887,15 @@ static bool read_field(SettingsState *state, size_t index, AppConfig *config) {
         *(bool *)destination = SendMessageW(control, BM_GETCHECK, 0, 0) == BST_CHECKED;
         return true;
     case FIELD_IDLE:
-    case FIELD_ANCHOR: {
+    case FIELD_ANCHOR:
+    case FIELD_PROVIDER: {
         LRESULT choice = SendMessageW(control, CB_GETCURSEL, 0, 0);
         if (choice < 0 || choice > (LRESULT)field->maximum)
             return false;
         if (field->kind == FIELD_IDLE)
             *(IdleContent *)destination = (IdleContent)choice;
+        else if (field->kind == FIELD_PROVIDER)
+            *(CrabProvider *)destination = (CrabProvider)choice;
         else
             *(int *)destination = (int)choice;
         return true;
@@ -885,8 +910,10 @@ static bool read_field(SettingsState *state, size_t index, AppConfig *config) {
         return false;
     GetWindowTextW(control, text, (int)COUNT_OF(text));
     if (field->kind == FIELD_TEXT || field->kind == FIELD_FONT) {
-        bool required = field->kind == FIELD_FONT || field->id == ID_SETTINGS_CRAB_NAME ||
-                        field->id == ID_SETTINGS_CRAB_MODEL;
+        bool required =
+            field->kind == FIELD_FONT || field->id == ID_SETTINGS_CRAB_NAME ||
+            ((field->id == ID_SETTINGS_CRAB_MODEL || field->id == ID_SETTINGS_CRAB_BASE_URL) &&
+             config->crab_provider != CRAB_PROVIDER_NONE);
         if (length > (int)field->maximum || (required && !*text))
             return false;
         if (required) {
@@ -945,7 +972,7 @@ static void field_help(const SettingsField *field, const AppConfig *config, bool
         swprintf(text, count, L"Enter a font name with 1 to 31 characters, for example Segoe UI.");
         break;
     case FIELD_TEXT:
-        swprintf(text, count, L"Use no more than 127 characters.");
+        swprintf(text, count, L"Use no more than %.0f characters.", field->maximum);
         break;
     default:
         swprintf(text, count, L"Choose an option from the list.");
@@ -955,7 +982,7 @@ static void field_help(const SettingsField *field, const AppConfig *config, bool
 
 static void update_field_help(SettingsState *state, size_t index, const AppConfig *config) {
     FieldControl *control = &state->controls[index];
-    wchar_t text[160];
+    wchar_t text[600];
     field_help(&fields[index], config, control->invalid, text, COUNT_OF(text));
     if (control->duplicate) {
         bool global = fields[index].id == ID_SETTINGS_CRAB_SHORTCUT ||
@@ -1198,11 +1225,12 @@ static void layout_page(SettingsState *state, int page) {
         move_control(state, control->label, left, y + 4, narrow ? available : 214, 22);
         int box_width = field->kind == FIELD_TEXT || field->kind == FIELD_FONT ||
                                 field->kind == FIELD_IDLE || field->kind == FIELD_ANCHOR ||
-                                field->kind == FIELD_MONITOR
+                                field->kind == FIELD_MONITOR || field->kind == FIELD_PROVIDER
                             ? input_width
                             : minimum(160, input_width);
         int box_height = field->kind == FIELD_IDLE || field->kind == FIELD_ANCHOR ||
-                                 field->kind == FIELD_MONITOR || field->kind == FIELD_FONT
+                                 field->kind == FIELD_MONITOR || field->kind == FIELD_PROVIDER ||
+                                 field->kind == FIELD_FONT
                              ? 220
                              : 26;
         if (field->kind == FIELD_COLOR) {
@@ -1565,16 +1593,31 @@ static void handle_command(SettingsState *state, WPARAM wparam, LPARAM lparam) {
     if (state->loading)
         return;
     if (id == ID_SETTINGS_CRAB_KEY && notification == BN_CLICKED) {
-        if (crab_key_prompt(state->window))
-            status_text(state, L"Crab API key saved in Windows Credential Manager.", false);
+        AppConfig draft;
+        if (!validate_form(state, &draft) || draft.crab_provider == CRAB_PROVIDER_NONE ||
+            !*draft.crab_base_url) {
+            status_text(state, L"Select a provider and enter a valid base URL first.", true);
+            return;
+        }
+        state->draft = draft;
+        if (crab_key_prompt(state->window, draft.crab_provider, draft.crab_base_url))
+            status_text(state, L"API key saved for this provider and base URL.", false);
         else
-            status_text(state, L"The API key was not saved.", true);
+            status_text(state, L"The API key was not saved. Local servers may not require one.",
+                        true);
         crab_status(state);
         return;
     }
     if (id == ID_SETTINGS_CRAB_DELETE_KEY && notification == BN_CLICKED) {
-        if (crab_key_delete())
-            status_text(state, L"Crab API key removed.", false);
+        AppConfig draft;
+        if (!validate_form(state, &draft) || draft.crab_provider == CRAB_PROVIDER_NONE ||
+            !*draft.crab_base_url) {
+            status_text(state, L"Select a provider and enter its base URL first.", true);
+            return;
+        }
+        state->draft = draft;
+        if (crab_key_delete(draft.crab_provider, draft.crab_base_url))
+            status_text(state, L"API key removed for this provider and base URL.", false);
         else
             status_text(state, L"Windows could not remove the API key.", true);
         crab_status(state);
@@ -1647,7 +1690,8 @@ static void handle_command(SettingsState *state, WPARAM wparam, LPARAM lparam) {
     }
     bool changed = kind == FIELD_BUTTON || kind == FIELD_STATUS ? false
                    : kind == FIELD_BOOLEAN                      ? notification == BN_CLICKED
-                   : kind == FIELD_IDLE || kind == FIELD_ANCHOR || kind == FIELD_MONITOR
+                   : kind == FIELD_IDLE || kind == FIELD_ANCHOR || kind == FIELD_MONITOR ||
+                           kind == FIELD_PROVIDER
                        ? notification == CBN_SELCHANGE
                    : kind == FIELD_FONT
                        ? notification == CBN_EDITCHANGE || notification == CBN_SELCHANGE

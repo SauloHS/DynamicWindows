@@ -6,6 +6,12 @@
 #include <wchar.h>
 
 typedef enum {
+    CRAB_PROVIDER_NONE,
+    CRAB_PROVIDER_ANTHROPIC,
+    CRAB_PROVIDER_OPENAI_COMPATIBLE
+} CrabProvider;
+
+typedef enum {
     IDLE_CLOCK,
     IDLE_DATE,
     IDLE_CLOCK_DATE,
@@ -123,8 +129,10 @@ typedef struct {
     int notification_alert_ms;
     bool crab_enabled;
     bool crab_speak;
+    CrabProvider crab_provider;
     ShortcutBinding crab_shortcut;
     wchar_t crab_name[64];
+    wchar_t crab_base_url[512];
     wchar_t crab_model[96];
     ShortcutBinding shortcuts[SHORTCUT_COUNT];
 } AppConfig;

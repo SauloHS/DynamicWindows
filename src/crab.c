@@ -11,9 +11,91 @@
 
 #define CRAB_MAX_RESPONSE (1024 * 1024)
 
-static const wchar_t anthropic_host[] = L"api.anthropic.com";
-static const wchar_t anthropic_path[] = L"/v1/messages";
 static const wchar_t user_agent[] = L"DynamicWindows/0.1 Crab";
+
+static bool endpoint_loopback(const wchar_t *host) {
+    return _wcsicmp(host, L"localhost") == 0 || _wcsicmp(host, L"127.0.0.1") == 0 ||
+           _wcsicmp(host, L"[::1]") == 0 || _wcsicmp(host, L"::1") == 0;
+}
+
+bool crab_endpoint_parse(CrabProvider provider, const wchar_t *base_url, CrabEndpoint *endpoint) {
+    if (!endpoint || provider <= CRAB_PROVIDER_NONE || provider > CRAB_PROVIDER_OPENAI_COMPATIBLE ||
+        !base_url || !*base_url || wcslen(base_url) >= 512)
+        return false;
+    *endpoint = (CrabEndpoint){.provider = provider};
+    URL_COMPONENTSW parts = {.dwStructSize = sizeof(parts),
+                             .dwSchemeLength = (DWORD)-1,
+                             .dwHostNameLength = (DWORD)-1,
+                             .dwUserNameLength = (DWORD)-1,
+                             .dwPasswordLength = (DWORD)-1,
+                             .dwUrlPathLength = (DWORD)-1,
+                             .dwExtraInfoLength = (DWORD)-1};
+    wchar_t url[512];
+    wcscpy(url, base_url);
+    size_t length = wcslen(url);
+    while (length > 0 && url[length - 1] == L'/')
+        url[--length] = L'\0';
+    if (!WinHttpCrackUrl(url, 0, 0, &parts) || !parts.lpszHostName || !parts.dwHostNameLength ||
+        parts.dwHostNameLength >= 256 || parts.dwUserNameLength || parts.dwPasswordLength ||
+        parts.dwExtraInfoLength)
+        return false;
+    endpoint->secure = parts.nScheme == INTERNET_SCHEME_HTTPS;
+    if (!endpoint->secure && parts.nScheme != INTERNET_SCHEME_HTTP)
+        return false;
+    wcsncpy(endpoint->host, parts.lpszHostName, parts.dwHostNameLength);
+    endpoint->host[parts.dwHostNameLength] = L'\0';
+    if (!endpoint->secure && !endpoint_loopback(endpoint->host))
+        return false;
+    endpoint->port = parts.nPort;
+    wchar_t base_path[768] = {0};
+    if (parts.lpszUrlPath && parts.dwUrlPathLength) {
+        if (parts.dwUrlPathLength >= 768)
+            return false;
+        wcsncpy(base_path, parts.lpszUrlPath, parts.dwUrlPathLength);
+    }
+    const wchar_t *suffix =
+        provider == CRAB_PROVIDER_ANTHROPIC ? L"/v1/messages" : L"/chat/completions";
+    size_t path_length = wcslen(base_path);
+    if (provider == CRAB_PROVIDER_ANTHROPIC && path_length >= 3 &&
+        _wcsicmp(base_path + path_length - 3, L"/v1") == 0)
+        suffix = L"/messages";
+    if (provider == CRAB_PROVIDER_OPENAI_COMPATIBLE &&
+        !(path_length >= 3 && _wcsicmp(base_path + path_length - 3, L"/v1") == 0))
+        suffix = L"/v1/chat/completions";
+    if (provider == CRAB_PROVIDER_ANTHROPIC && path_length >= 12 &&
+        _wcsicmp(base_path + path_length - 12, L"/v1/messages") == 0)
+        suffix = L"";
+    if (provider == CRAB_PROVIDER_OPENAI_COMPATIBLE && path_length >= 17 &&
+        _wcsicmp(base_path + path_length - 17, L"/chat/completions") == 0)
+        suffix = L"";
+    if (swprintf(endpoint->path, 1024, L"%ls%ls", *base_path ? base_path : L"", suffix) <= 0)
+        return false;
+    bool default_port = (endpoint->secure && endpoint->port == INTERNET_DEFAULT_HTTPS_PORT) ||
+                        (!endpoint->secure && endpoint->port == INTERNET_DEFAULT_HTTP_PORT);
+    if (default_port)
+        swprintf(endpoint->normalized, 1280, L"%ls://%ls%ls", endpoint->secure ? L"https" : L"http",
+                 endpoint->host, *base_path ? base_path : L"");
+    else
+        swprintf(endpoint->normalized, 1280, L"%ls://%ls:%u%ls",
+                 endpoint->secure ? L"https" : L"http", endpoint->host, endpoint->port,
+                 *base_path ? base_path : L"");
+    return true;
+}
+
+static bool credential_target(CrabProvider provider, const wchar_t *base_url, wchar_t *target,
+                              size_t count) {
+    CrabEndpoint endpoint;
+    if (!crab_endpoint_parse(provider, base_url, &endpoint))
+        return false;
+    uint64_t hash = UINT64_C(1469598103934665603);
+    for (const wchar_t *cursor = endpoint.normalized; *cursor; ++cursor) {
+        wchar_t value = towlower(*cursor);
+        hash ^= (uint16_t)value;
+        hash *= UINT64_C(1099511628211);
+    }
+    return swprintf(target, count, L"DynamicWindows/Crab/%d/%016llx", (int)provider,
+                    (unsigned long long)hash) > 0;
+}
 
 static bool word_boundary(wchar_t value) {
     return !value || iswspace(value) || iswpunct(value);
@@ -235,11 +317,20 @@ static bool json_decode(const char *start, const char **end, wchar_t *text, size
     return true;
 }
 
-bool crab_response_text(const char *json, wchar_t *answer, size_t count) {
+bool crab_response_text(CrabProvider provider, const char *json, wchar_t *answer, size_t count) {
     if (!json || !answer || count == 0)
         return false;
     answer[0] = L'\0';
     const char *cursor = json;
+    if (provider == CRAB_PROVIDER_OPENAI_COMPATIBLE) {
+        const char *choices = strstr(json, "\"choices\"");
+        const char *message = choices ? strstr(choices, "\"message\"") : NULL;
+        const char *content = message ? strstr(message, "\"content\"") : NULL;
+        const char *colon = content ? strchr(content + 9, ':') : NULL;
+        return colon && json_decode(skip_space(colon + 1), NULL, answer, count);
+    }
+    if (provider != CRAB_PROVIDER_ANTHROPIC)
+        return false;
     while ((cursor = strstr(cursor, "\"type\"")) != NULL) {
         const char *colon = strchr(cursor + 6, ':');
         if (!colon)
@@ -265,43 +356,83 @@ bool crab_response_text(const char *json, wchar_t *answer, size_t count) {
     return false;
 }
 
-bool crab_key_exists(void) {
+bool crab_key_exists(CrabProvider provider, const wchar_t *base_url) {
+    if (provider == CRAB_PROVIDER_OPENAI_COMPATIBLE) {
+        CrabEndpoint endpoint;
+        if (crab_endpoint_parse(provider, base_url, &endpoint) && !endpoint.secure &&
+            endpoint_loopback(endpoint.host))
+            return true;
+    }
+    wchar_t target[128];
+    if (!credential_target(provider, base_url, target, 128))
+        return false;
     PCREDENTIALW credential = NULL;
-    bool exists = CredReadW(CRAB_CREDENTIAL_TARGET, CRED_TYPE_GENERIC, 0, &credential) != FALSE &&
-                  credential && credential->CredentialBlobSize > 0;
+    bool exists = CredReadW(target, CRED_TYPE_GENERIC, 0, &credential) != FALSE && credential &&
+                  credential->CredentialBlobSize > 0;
+    if (!exists && provider == CRAB_PROVIDER_ANTHROPIC &&
+        _wcsicmp(base_url, L"https://api.anthropic.com") == 0)
+        exists =
+            CredReadW(CRAB_LEGACY_CREDENTIAL_TARGET, CRED_TYPE_GENERIC, 0, &credential) != FALSE &&
+            credential && credential->CredentialBlobSize > 0;
     if (credential)
         CredFree(credential);
     return exists;
 }
 
-static bool key_read(char *key, size_t count) {
+static bool key_read(CrabProvider provider, const wchar_t *base_url, char *key, size_t count) {
+    wchar_t target[128];
+    if (!credential_target(provider, base_url, target, 128))
+        return false;
     PCREDENTIALW credential = NULL;
-    if (!CredReadW(CRAB_CREDENTIAL_TARGET, CRED_TYPE_GENERIC, 0, &credential) || !credential)
+    bool legacy = false;
+    if (!CredReadW(target, CRED_TYPE_GENERIC, 0, &credential) &&
+        provider == CRAB_PROVIDER_ANTHROPIC &&
+        _wcsicmp(base_url, L"https://api.anthropic.com") == 0) {
+        legacy = true;
+        (void)CredReadW(CRAB_LEGACY_CREDENTIAL_TARGET, CRED_TYPE_GENERIC, 0, &credential);
+    }
+    if (!credential)
         return false;
     size_t size = credential->CredentialBlobSize;
     bool valid = size > 0 && size < count;
     if (valid) {
         memcpy(key, credential->CredentialBlob, size);
         key[size] = '\0';
+        if (legacy) {
+            CREDENTIALW migrated = {.Type = CRED_TYPE_GENERIC,
+                                    .TargetName = target,
+                                    .CredentialBlobSize = (DWORD)size,
+                                    .CredentialBlob = (BYTE *)key,
+                                    .Persist = CRED_PERSIST_LOCAL_MACHINE,
+                                    .UserName = L"Crab API key"};
+            (void)CredWriteW(&migrated, 0);
+        }
     }
     CredFree(credential);
     return valid;
 }
 
-bool crab_key_prompt(HWND parent) {
-    wchar_t user[CREDUI_MAX_USERNAME_LENGTH + 1] = L"Anthropic API key";
+bool crab_key_prompt(HWND parent, CrabProvider provider, const wchar_t *base_url) {
+    wchar_t target[128];
+    if (!credential_target(provider, base_url, target, 128))
+        return false;
+    wchar_t user[CREDUI_MAX_USERNAME_LENGTH + 1] = L"Crab API key";
     wchar_t password[CREDUI_MAX_PASSWORD_LENGTH + 1] = {0};
+    wchar_t message[768];
+    swprintf(message, 768,
+             L"Enter an API key for %ls at %ls. It is isolated to this endpoint in Windows "
+             L"Credential Manager, never settings.ini.",
+             crab_provider_text(provider), base_url);
     CREDUI_INFOW info = {.cbSize = sizeof(info),
                          .hwndParent = parent,
-                         .pszMessageText = L"Enter an Anthropic API key for Crab. It is stored in "
-                                           L"Windows Credential Manager, not settings.ini.",
+                         .pszMessageText = message,
                          .pszCaptionText = L"Connect Crab"};
     BOOL save = TRUE;
-    DWORD result = CredUIPromptForCredentialsW(
-        &info, CRAB_CREDENTIAL_TARGET, NULL, 0, user, CREDUI_MAX_USERNAME_LENGTH + 1, password,
-        CREDUI_MAX_PASSWORD_LENGTH + 1, &save,
-        CREDUI_FLAGS_GENERIC_CREDENTIALS | CREDUI_FLAGS_ALWAYS_SHOW_UI |
-            CREDUI_FLAGS_DO_NOT_PERSIST);
+    DWORD result =
+        CredUIPromptForCredentialsW(&info, target, NULL, 0, user, CREDUI_MAX_USERNAME_LENGTH + 1,
+                                    password, CREDUI_MAX_PASSWORD_LENGTH + 1, &save,
+                                    CREDUI_FLAGS_GENERIC_CREDENTIALS | CREDUI_FLAGS_ALWAYS_SHOW_UI |
+                                        CREDUI_FLAGS_DO_NOT_PERSIST);
     if (result != NO_ERROR) {
         SecureZeroMemory(password, sizeof(password));
         return false;
@@ -314,11 +445,11 @@ bool crab_key_prompt(HWND parent) {
                                    NULL) > 0) {
         size_t length = strlen(key);
         CREDENTIALW credential = {.Type = CRED_TYPE_GENERIC,
-                                  .TargetName = (wchar_t *)CRAB_CREDENTIAL_TARGET,
+                                  .TargetName = target,
                                   .CredentialBlobSize = (DWORD)length,
                                   .CredentialBlob = (BYTE *)key,
                                   .Persist = CRED_PERSIST_LOCAL_MACHINE,
-                                  .UserName = L"Anthropic API key"};
+                                  .UserName = L"Crab API key"};
         stored = length > 0 && length <= CRED_MAX_CREDENTIAL_BLOB_SIZE &&
                  CredWriteW(&credential, 0) != FALSE;
     }
@@ -330,10 +461,20 @@ bool crab_key_prompt(HWND parent) {
     return stored;
 }
 
-bool crab_key_delete(void) {
-    if (CredDeleteW(CRAB_CREDENTIAL_TARGET, CRED_TYPE_GENERIC, 0))
-        return true;
-    return GetLastError() == ERROR_NOT_FOUND;
+bool crab_key_delete(CrabProvider provider, const wchar_t *base_url) {
+    wchar_t target[128];
+    if (!credential_target(provider, base_url, target, 128))
+        return false;
+    bool deleted = CredDeleteW(target, CRED_TYPE_GENERIC, 0) != FALSE;
+    DWORD error = deleted ? ERROR_SUCCESS : GetLastError();
+    if (provider == CRAB_PROVIDER_ANTHROPIC &&
+        _wcsicmp(base_url, L"https://api.anthropic.com") == 0) {
+        if (CredDeleteW(CRAB_LEGACY_CREDENTIAL_TARGET, CRED_TYPE_GENERIC, 0))
+            deleted = true;
+        else if (GetLastError() != ERROR_NOT_FOUND)
+            return false;
+    }
+    return deleted || error == ERROR_NOT_FOUND;
 }
 
 static void request_cancel(CrabService *service) {
@@ -519,35 +660,48 @@ failed:
     return false;
 }
 
-static HRESULT ask_claude(CrabService *service, const wchar_t *question, wchar_t *answer,
-                          size_t count) {
+static HRESULT ask_provider(CrabService *service, const wchar_t *question, wchar_t *answer,
+                            size_t count) {
     if (InterlockedCompareExchange(&service->cancel_request, 0, 0))
         return E_ABORT;
-    char key[CRED_MAX_CREDENTIAL_BLOB_SIZE + 1] = {0};
-    if (!key_read(key, sizeof(key)))
-        return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
-    char prompt[8192];
-    if (!crab_json_string(question, prompt, sizeof(prompt))) {
-        SecureZeroMemory(key, sizeof(key));
-        return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
-    }
-    char model[256];
+    CrabProvider provider;
+    wchar_t base_url[512];
     wchar_t model_name[96];
     EnterCriticalSection(&service->lock);
+    provider = service->provider;
+    wcsncpy(base_url, service->base_url, 511);
+    base_url[511] = L'\0';
     wcsncpy(model_name, service->model, 95);
     model_name[95] = L'\0';
     LeaveCriticalSection(&service->lock);
-    if (!crab_json_string(model_name, model, sizeof(model))) {
+    CrabEndpoint endpoint;
+    if (!crab_endpoint_parse(provider, base_url, &endpoint) || !*model_name)
+        return HRESULT_FROM_WIN32(ERROR_INVALID_PARAMETER);
+    char key[CRED_MAX_CREDENTIAL_BLOB_SIZE + 1] = {0};
+    bool has_key = key_read(provider, base_url, key, sizeof(key));
+    if (!has_key && (provider == CRAB_PROVIDER_ANTHROPIC || endpoint.secure))
+        return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+    char prompt[8192];
+    char model[256];
+    if (!crab_json_string(question, prompt, sizeof(prompt)) ||
+        !crab_json_string(model_name, model, sizeof(model))) {
         SecureZeroMemory(key, sizeof(key));
         return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
     }
-    static const char format[] =
+    static const char anthropic_format[] =
         "{\"model\":%s,\"max_tokens\":1024,\"fallbacks\":\"default\","
         "\"output_config\":{\"effort\":\"medium\"},"
         "\"system\":\"You are Crab, a concise Windows voice assistant. Answer directly in "
         "plain text suitable for speech. Keep most answers under 120 words. Never claim to have "
         "performed an action you cannot perform.\",\"messages\":[{\"role\":\"user\","
         "\"content\":%s}]}";
+    static const char openai_format[] =
+        "{\"model\":%s,\"max_tokens\":1024,\"stream\":false,\"messages\":["
+        "{\"role\":\"system\",\"content\":\"You are Crab, a concise Windows voice "
+        "assistant. Answer directly in plain text suitable for speech. Keep most answers under "
+        "120 words. Never claim to have performed an action you cannot perform.\"},"
+        "{\"role\":\"user\",\"content\":%s}]}";
+    const char *format = provider == CRAB_PROVIDER_ANTHROPIC ? anthropic_format : openai_format;
     int body_size = snprintf(NULL, 0, format, model, prompt);
     char *body = body_size > 0 ? malloc((size_t)body_size + 1) : NULL;
     if (!body) {
@@ -560,19 +714,18 @@ static HRESULT ask_claude(CrabService *service, const wchar_t *question, wchar_t
     if (session && !WinHttpSetTimeouts(session, 5000, 5000, 10000, 60000)) {
         HRESULT timeout_error = HRESULT_FROM_WIN32(GetLastError());
         WinHttpCloseHandle(session);
-        session = NULL;
         SecureZeroMemory(key, sizeof(key));
         SecureZeroMemory(body, (size_t)body_size + 1);
         free(body);
         return timeout_error;
     }
     HINTERNET connection =
-        session ? WinHttpConnect(session, anthropic_host, INTERNET_DEFAULT_HTTPS_PORT, 0) : NULL;
-    HINTERNET request =
-        connection
-            ? WinHttpOpenRequest(connection, L"POST", anthropic_path, NULL, WINHTTP_NO_REFERER,
-                                 WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE)
-            : NULL;
+        session ? WinHttpConnect(session, endpoint.host, endpoint.port, 0) : NULL;
+    HINTERNET request = connection
+                            ? WinHttpOpenRequest(connection, L"POST", endpoint.path, NULL,
+                                                 WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
+                                                 endpoint.secure ? WINHTTP_FLAG_SECURE : 0)
+                            : NULL;
     if (service->lock_ready)
         EnterCriticalSection(&service->lock);
     service->active_request = request;
@@ -583,22 +736,28 @@ static HRESULT ask_claude(CrabService *service, const wchar_t *question, wchar_t
     if (SUCCEEDED(result) && !WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY,
                                                &redirect_policy, sizeof(redirect_policy)))
         result = HRESULT_FROM_WIN32(GetLastError());
-    wchar_t headers[1800];
-    int key_length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, key, -1, NULL, 0);
-    wchar_t *wide_key = key_length > 1 ? calloc((size_t)key_length, sizeof(wchar_t)) : NULL;
-    if (!wide_key ||
-        !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, key, -1, wide_key, key_length))
-        result = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
-    if (SUCCEEDED(result)) {
+    wchar_t headers[1800] = L"Content-Type: application/json\r\n";
+    wchar_t *wide_key = NULL;
+    int key_length = 0;
+    if (has_key) {
+        key_length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, key, -1, NULL, 0);
+        wide_key = key_length > 1 ? calloc((size_t)key_length, sizeof(wchar_t)) : NULL;
+        if (!wide_key ||
+            !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, key, -1, wide_key, key_length))
+            result = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+    }
+    if (SUCCEEDED(result) && provider == CRAB_PROVIDER_ANTHROPIC)
         swprintf(headers, sizeof(headers) / sizeof(headers[0]),
                  L"Content-Type: application/json\r\nx-api-key: %ls\r\nanthropic-version: "
                  L"2026-10-21\r\nanthropic-beta: server-side-fallback-2026-07-01\r\n",
                  wide_key);
-        if (!WinHttpSendRequest(request, headers, (DWORD)-1L, body, (DWORD)body_size,
-                                (DWORD)body_size, 0) ||
-            !WinHttpReceiveResponse(request, NULL))
-            result = HRESULT_FROM_WIN32(GetLastError());
-    }
+    else if (SUCCEEDED(result) && has_key)
+        swprintf(headers, sizeof(headers) / sizeof(headers[0]),
+                 L"Content-Type: application/json\r\nAuthorization: Bearer %ls\r\n", wide_key);
+    if (SUCCEEDED(result) && (!WinHttpSendRequest(request, headers, (DWORD)-1L, body,
+                                                  (DWORD)body_size, (DWORD)body_size, 0) ||
+                              !WinHttpReceiveResponse(request, NULL)))
+        result = HRESULT_FROM_WIN32(GetLastError());
     if (SUCCEEDED(result) && InterlockedCompareExchange(&service->cancel_request, 0, 0))
         result = E_ABORT;
     DWORD status = 0;
@@ -608,12 +767,9 @@ static HRESULT ask_claude(CrabService *service, const wchar_t *question, wchar_t
                               &status, &status_size, NULL) ||
          status < 200 || status >= 300))
         result = HRESULT_FROM_WIN32(status ? status : GetLastError());
-    if (SUCCEEDED(result) && status >= 200 && status < 300 &&
-        InterlockedCompareExchange(&service->cancel_request, 0, 0))
-        result = E_ABORT;
     char *response = NULL;
-    if (SUCCEEDED(result) &&
-        (!response_read(request, &response) || !crab_response_text(response, answer, count)))
+    if (SUCCEEDED(result) && (!response_read(request, &response) ||
+                              !crab_response_text(provider, response, answer, count)))
         result = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
     free(response);
     SecureZeroMemory(headers, sizeof(headers));
@@ -709,7 +865,7 @@ static DWORD WINAPI crab_thread(void *argument) {
         }
         post_state(service, CRAB_THINKING, S_OK, transcript, NULL);
         wchar_t answer[2048] = {0};
-        result = ask_claude(service, question, answer, 2048);
+        result = ask_provider(service, question, answer, 2048);
         if (FAILED(result)) {
             if (result != E_ABORT)
                 post_state(service, CRAB_ERROR, result, transcript, NULL);
@@ -732,14 +888,14 @@ static DWORD WINAPI crab_thread(void *argument) {
     return 0;
 }
 
-bool crab_start(CrabService *service, HWND window, bool enabled, bool speak,
-                const wchar_t *wake_name, const wchar_t *model) {
+bool crab_start(CrabService *service, HWND window, bool enabled, bool speak, CrabProvider provider,
+                const wchar_t *wake_name, const wchar_t *base_url, const wchar_t *model) {
     *service = (CrabService){.window = window};
     InitializeCriticalSection(&service->lock);
     service->lock_ready = true;
     service->stop = CreateEventW(NULL, TRUE, FALSE, NULL);
     service->wake = CreateEventW(NULL, FALSE, FALSE, NULL);
-    crab_configure(service, enabled, speak, wake_name, model);
+    crab_configure(service, enabled, speak, provider, wake_name, base_url, model);
     if (service->stop && service->wake)
         service->thread = CreateThread(NULL, 0, crab_thread, service, 0, NULL);
     if (service->thread)
@@ -750,15 +906,18 @@ bool crab_start(CrabService *service, HWND window, bool enabled, bool speak,
     return false;
 }
 
-void crab_configure(CrabService *service, bool enabled, bool speak, const wchar_t *wake_name,
-                    const wchar_t *model) {
+void crab_configure(CrabService *service, bool enabled, bool speak, CrabProvider provider,
+                    const wchar_t *wake_name, const wchar_t *base_url, const wchar_t *model) {
     if (!service)
         return;
     if (service->lock_ready)
         EnterCriticalSection(&service->lock);
+    service->provider = provider;
     wcsncpy(service->wake_name, wake_name && *wake_name ? wake_name : L"Crab", 63);
     service->wake_name[63] = L'\0';
-    wcsncpy(service->model, model && *model ? model : L"claude-opus-5-5", 95);
+    wcsncpy(service->base_url, base_url ? base_url : L"", 511);
+    service->base_url[511] = L'\0';
+    wcsncpy(service->model, model ? model : L"", 95);
     service->model[95] = L'\0';
     if (service->lock_ready)
         LeaveCriticalSection(&service->lock);
@@ -812,6 +971,18 @@ void crab_stop(CrabService *service) {
     if (service->lock_ready)
         DeleteCriticalSection(&service->lock);
     *service = (CrabService){0};
+}
+
+const wchar_t *crab_provider_text(CrabProvider provider) {
+    switch (provider) {
+    case CRAB_PROVIDER_ANTHROPIC:
+        return L"Anthropic Messages";
+    case CRAB_PROVIDER_OPENAI_COMPATIBLE:
+        return L"OpenAI-compatible Chat Completions";
+    case CRAB_PROVIDER_NONE:
+    default:
+        return L"No provider";
+    }
 }
 
 const wchar_t *crab_state_text(CrabState state) {
