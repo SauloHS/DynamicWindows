@@ -2,6 +2,7 @@
 #define DYNAMICWINDOWS_APP_H
 
 #include "config.h"
+#include "headphones.h"
 #include "island.h"
 #include "media.h"
 #include "platform.h"
@@ -161,6 +162,9 @@ typedef struct App {
     Platform platform;
     SystemSnapshot system;
     bool system_sampled;
+    HeadphoneService headphone_service;
+    HeadphoneSnapshot headphones;
+    HeadphoneEvent headphone_event;
     MediaService media_service;
     MediaSnapshot media;
     Renderer renderer;

@@ -32,10 +32,15 @@ DynamicWindows brings a Dynamic Island-inspired activity surface to **Windows 10
 - **Small by default.** A blank 80 × 28 logical-pixel pill becomes an artwork-and-waveform surface during playback. Changes briefly reveal the title without leaving a big panel open.
 - **A timer that stays visible.** Start, pause, resume, or reset a countdown. Simultaneous media and timer activity can split into two bubbles.
 - **System controls without the detour.** Adjust volume and mute, see power changes, and open the actual Windows Search panel.
+- **Headphones, without guessing.** Connection and disconnection alerts for wired/USB headphones and Bluetooth audio, plus battery levels when Windows reports them.
 - **Motion with continuity.** Interruptible springs, adjustable damping, and slide-and-fade hide/show transitions. Windows' reduced-motion setting is respected.
 - **Yours to configure.** Six native settings tabs, live preview, saved preferences, monitor placement, colors, and customizable app shortcuts.
 
 > **Early release:** v0.1.0 is a usable first version, not a finished operating-system component. Media support depends on what your player exposes to Windows. Bug reports with reproduction steps are welcome.
+
+## Unreleased
+
+The source branch adds headphone/Bluetooth integration beyond the published v0.1.0 downloads. Build from source to use it; existing release assets have not been replaced.
 
 ## Get started
 
@@ -85,6 +90,14 @@ Playback position combines the player's timeline timestamp with a continuous loc
 The hide shortcut slides and fades the island away. Supported media changes, timer events, volume changes, and power alerts briefly reveal a hidden island, then restore its hidden state.
 
 Full-screen suppression takes priority. Clicking a temporary preview explicitly opens the island. Clicking outside a manually opened island collapses it without blocking the outside click.
+
+### Headphones and Bluetooth
+
+Connecting or disconnecting headphones briefly shows the device name on the island. Bluetooth audio includes a battery percentage when its Windows driver publishes one. Missing battery data is shown as **unavailable**, not zero or an estimate. Windows can expose some Bluetooth speakers through the same audio endpoint path.
+
+Detection follows active Windows audio endpoints and matches Bluetooth device properties by physical container identity, not by a guessed device name. Wired jack detection depends on the audio driver exposing headphone/headset state. The first scan establishes a baseline without replaying existing connections. Battery changes also produce a brief update when enabled.
+
+Use **Behavior → Headphones and Bluetooth** to control alerts, battery visibility, and alert duration. The System panel keeps connected device information available. All device discovery runs on a worker; no pairing, drivers, microphone capture, or network access is needed.
 
 ### Timers and system activity
 
@@ -181,6 +194,7 @@ cmake --build build --target lint
 
 - **Core tests:** countdown deadlines, pause/resume, priority, geometry, and frame-rate-independent springs.
 - **Configuration tests:** defaults, Unicode persistence, limits, placement, and malformed input.
+- **Headphone tests:** connection/disconnection deltas, Bluetooth identity, validated battery values, unavailable battery text, and bounded events. No mouse, audio changes, or hardware required.
 - **Native smoke:** renders representative states and checks alpha hit-testing and accessibility names/roles.
 
 Optional GUI checks require Python 3 and an interactive Windows desktop. They move the pointer, foreground the test app, and save local screenshots. Quit any existing instance first, and do not share screenshots containing private desktop content.

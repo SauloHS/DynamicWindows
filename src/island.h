@@ -6,7 +6,7 @@
 
 typedef enum { ISLAND_MEDIA, ISLAND_TIMER, ISLAND_SYSTEM } IslandView;
 typedef enum { ACTIVITY_NONE, ACTIVITY_MEDIA, ACTIVITY_TIMER } IslandActivity;
-typedef enum { ALERT_NONE, ALERT_VOLUME, ALERT_POWER, ALERT_TIMER } IslandAlert;
+typedef enum { ALERT_NONE, ALERT_VOLUME, ALERT_POWER, ALERT_HEADPHONES, ALERT_TIMER } IslandAlert;
 
 typedef struct {
     uint64_t duration;

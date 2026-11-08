@@ -71,6 +71,16 @@ void app_summary(const App *app, wchar_t *text, size_t count) {
         swprintf(text, count, L"DynamicWindows. Timer finished. Click to dismiss.");
         return;
     }
+    if (app->island.alert == ALERT_HEADPHONES && !app->island.expanded) {
+        wchar_t detail[160];
+        headphones_detail(&app->headphone_event.device, app->config.headphone_battery, detail, 160);
+        swprintf(text, count, L"DynamicWindows. %ls. %ls. %ls.", app->headphone_event.device.name,
+                 app->headphone_event.change == HEADPHONE_DISCONNECTED ? L"Disconnected"
+                 : app->headphone_event.change == HEADPHONE_BATTERY    ? L"Battery updated"
+                                                                       : L"Connected",
+                 detail);
+        return;
+    }
     if (app->island.expanded) {
         if (app->island.view == ISLAND_TIMER) {
             wchar_t clock[32];
@@ -801,6 +811,36 @@ static void pointer_state(App *app, uint64_t now) {
         app_close(app);
 }
 
+static void headphones_receive(App *app, HeadphoneSnapshot *snapshot) {
+    if (!snapshot)
+        return;
+    if (FAILED(snapshot->error) && app->headphones.initialized &&
+        SUCCEEDED(app->headphones.error)) {
+        free(snapshot);
+        return;
+    }
+    HeadphoneEvent events[HEADPHONES_LIMIT * 2];
+    unsigned count = headphones_changes(&app->headphones, snapshot, events, HEADPHONES_LIMIT * 2);
+    app->headphones = *snapshot;
+    free(snapshot);
+    for (unsigned i = 0; i < count; ++i) {
+        if (!app->config.headphone_alerts ||
+            (events[i].change == HEADPHONE_BATTERY && !app->config.headphone_battery))
+            continue;
+        uint64_t now = GetTickCount64();
+        island_show_alert(&app->island, ALERT_HEADPHONES, now);
+        if (app->island.alert != ALERT_HEADPHONES)
+            continue;
+        app->headphone_event = events[i];
+        app->island.alert_deadline = now + (uint64_t)app->config.headphone_alert_ms;
+        app_event(app, false);
+        app->event_until = app->island.alert_deadline;
+        NotifyWinEvent(EVENT_SYSTEM_ALERT, app->window, OBJID_CLIENT, CHILDID_SELF);
+        break;
+    }
+    app_animate(app);
+}
+
 static void system_poll(App *app, uint64_t now) {
     SystemSnapshot snapshot;
     platform_poll(&app->platform, &snapshot, now);
@@ -1123,7 +1163,11 @@ static void shutdown_app(App *app) {
     }
     settings_destroy(app);
     media_stop(&app->media_service);
+    headphones_stop(&app->headphone_service);
     MSG message;
+    while (PeekMessageW(&message, app->window, WM_DYNAMICWINDOWS_HEADPHONES,
+                        WM_DYNAMICWINDOWS_HEADPHONES, PM_REMOVE))
+        free((HeadphoneSnapshot *)message.lParam);
     while (PeekMessageW(&message, app->window, WM_DYNAMICWINDOWS_MEDIA, WM_DYNAMICWINDOWS_MEDIA,
                         PM_REMOVE))
         media_snapshot_free((MediaSnapshot *)message.lParam);
@@ -1245,6 +1289,13 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LP
         } else {
             app_action(app, (Action)wparam, (double)lparam / 10000);
         }
+        return 0;
+    case WM_DYNAMICWINDOWS_HEADPHONES:
+        headphones_receive(app, (HeadphoneSnapshot *)lparam);
+        return 0;
+    case WM_DEVICECHANGE:
+        headphones_wake(&app->headphone_service);
+        app->platform.next_device_check = 0;
         return 0;
     case WM_DYNAMICWINDOWS_TRAY:
         if (LOWORD(lparam) == WM_CONTEXTMENU || LOWORD(lparam) == WM_RBUTTONUP)
@@ -1511,6 +1562,8 @@ static bool create_app(App *app, const Options *options) {
     app_render(app);
     if (options->smoke)
         return true;
+    if (!headphones_start(&app->headphone_service, app->window))
+        app->headphones = (HeadphoneSnapshot){.initialized = true, .error = E_FAIL};
     if (options->demo) {
         app->media = (MediaSnapshot){.initialized = true,
                                      .available = true,

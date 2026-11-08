@@ -66,7 +66,10 @@ void config_defaults(AppConfig *config) {
                           .settings_on_start = false,
                           .change_preview_ms = 3000,
                           .media_extra_width = 36,
-                          .artwork_background = true};
+                          .artwork_background = true,
+                          .headphone_alerts = true,
+                          .headphone_battery = true,
+                          .headphone_alert_ms = 4000};
     config->shortcuts[SHORTCUT_ISLAND] = (ShortcutBinding){'D', MOD_CONTROL | MOD_ALT};
     config->shortcuts[SHORTCUT_TIMER] = (ShortcutBinding){'T', MOD_CONTROL | MOD_ALT};
     config->shortcuts[SHORTCUT_HIDE] = (ShortcutBinding){'H', MOD_CONTROL | MOD_ALT};
@@ -136,6 +139,7 @@ void config_normalize(AppConfig *config) {
     config->timer_seconds = integer_clamp(config->timer_seconds, 1, 86400);
     config->change_preview_ms = integer_clamp(config->change_preview_ms, 500, 15000);
     config->media_extra_width = integer_clamp(config->media_extra_width, 0, 200);
+    config->headphone_alert_ms = integer_clamp(config->headphone_alert_ms, 250, 15000);
 }
 
 bool config_default_path(wchar_t *path, size_t count) {
@@ -216,7 +220,10 @@ static bool write_number(const wchar_t *path, const wchar_t *name, double value)
     X(settings_on_start)                                                                           \
     X(change_preview_ms)                                                                           \
     X(media_extra_width)                                                                           \
-    X(artwork_background)
+    X(artwork_background)                                                                          \
+    X(headphone_alerts)                                                                            \
+    X(headphone_battery)                                                                           \
+    X(headphone_alert_ms)
 
 typedef struct {
     const wchar_t *name;

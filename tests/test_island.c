@@ -88,6 +88,10 @@ static void test_alerts(void) {
     island_show_alert(&island, ALERT_VOLUME, 4000);
     CHECK(island.alert == ALERT_POWER);
     CHECK(island.alert_deadline == 7000);
+    island_show_alert(&island, ALERT_HEADPHONES, 4500);
+    CHECK(island.alert == ALERT_HEADPHONES);
+    island_show_alert(&island, ALERT_POWER, 4600);
+    CHECK(island.alert == ALERT_HEADPHONES);
     island_show_alert(&island, ALERT_TIMER, 5000);
     CHECK(island.alert == ALERT_TIMER);
     island_show_alert(&island, ALERT_POWER, 6000);

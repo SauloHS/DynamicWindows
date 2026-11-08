@@ -20,7 +20,8 @@ typedef enum {
     GLYPH_BATTERY,
     GLYPH_POWER,
     GLYPH_SETTINGS,
-    GLYPH_CHECK
+    GLYPH_CHECK,
+    GLYPH_HEADPHONES
 } Glyph;
 
 static ARGB ink(const Renderer *renderer, ARGB color) {
@@ -249,6 +250,21 @@ static void glyph(Renderer *renderer, Glyph symbol, double x, double y, double s
         polygon(renderer, points, 6, color);
         return;
     }
+    if (symbol == GLYPH_HEADPHONES) {
+        arc(renderer,
+            (RectF){(REAL)(left + 3 * unit), (REAL)(top + 3 * unit), (REAL)(18 * unit),
+                    (REAL)(18 * unit)},
+            180, 180, color, stroke);
+        fill(renderer,
+             (RectF){(REAL)(left + 2 * unit), (REAL)(top + 12 * unit), (REAL)(5 * unit),
+                     (REAL)(9 * unit)},
+             2 * unit, color);
+        fill(renderer,
+             (RectF){(REAL)(left + 17 * unit), (REAL)(top + 12 * unit), (REAL)(5 * unit),
+                     (REAL)(9 * unit)},
+             2 * unit, color);
+        return;
+    }
     if (symbol == GLYPH_CHECK) {
         line(renderer, x - 7 * unit, y, x - 2 * unit, y + 5 * unit, color, stroke);
         line(renderer, x - 2 * unit, y + 5 * unit, x + 8 * unit, y - 6 * unit, color, stroke);
@@ -461,6 +477,21 @@ static void compact(App *app, bool add_hits) {
         else
             wcscpy(detail, app->system.plugged_in ? L"External power" : L"Power source changed");
         text(renderer, detail, (RectF){body.X + 59, body.Y + 34, body.Width - 80, 22}, FONT_BODY,
+             COLOR_SECONDARY, StringAlignmentNear);
+        return;
+    }
+    if (app->island.alert == ALERT_HEADPHONES) {
+        const HeadphoneEvent *event = &app->headphone_event;
+        wchar_t detail[160];
+        if (event->change == HEADPHONE_DISCONNECTED)
+            wcscpy(detail, L"Disconnected");
+        else
+            headphones_detail(&event->device, app->config.headphone_battery, detail, 160);
+        glyph(renderer, GLYPH_HEADPHONES, body.X + 30, middle, 27,
+              event->change == HEADPHONE_DISCONNECTED ? COLOR_SECONDARY : COLOR_ACCENT);
+        text(renderer, event->device.name, (RectF){body.X + 59, body.Y + 10, body.Width - 80, 24},
+             FONT_LABEL, COLOR_TEXT, StringAlignmentNear);
+        text(renderer, detail, (RectF){body.X + 59, body.Y + 36, body.Width - 80, 22}, FONT_BODY,
              COLOR_SECONDARY, StringAlignmentNear);
         return;
     }
@@ -705,7 +736,16 @@ static void system_panel(App *app, bool add_hits) {
          app->system.audio_available ? app->system.output_name : L"No audio output detected",
          (RectF){body.X + 24, body.Y + 94, body.Width - 48, 22}, FONT_SMALL, COLOR_SECONDARY,
          StringAlignmentNear);
-    volume_row(app, body.Y + 140, add_hits);
+    if (app->headphones.count) {
+        const HeadphoneDevice *device = &app->headphones.devices[0];
+        wchar_t detail[320];
+        wchar_t connection[160];
+        headphones_detail(device, app->config.headphone_battery, connection, 160);
+        swprintf(detail, 320, L"%ls · %ls", device->name, connection);
+        text(renderer, detail, (RectF){body.X + 24, body.Y + 115, body.Width - 48, 18}, FONT_SMALL,
+             COLOR_ACCENT, StringAlignmentNear);
+    }
+    volume_row(app, body.Y + 145, add_hits);
     line(renderer, body.X + 24, body.Y + 170, body.X + body.Width - 24, body.Y + 170, COLOR_BORDER,
          1);
     glyph(renderer, app->system.plugged_in ? GLYPH_POWER : GLYPH_BATTERY, body.X + 37, body.Y + 203,

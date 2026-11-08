@@ -27,6 +27,9 @@ static void test_defaults(void) {
     CHECK(config.response_ms == 420);
     CHECK(config.frame_rate == 120);
     CHECK(config.colors[TINT_BACKGROUND] == 0x050506);
+    CHECK(config.headphone_alerts);
+    CHECK(config.headphone_battery);
+    CHECK(config.headphone_alert_ms == 4000);
     CHECK(wcscmp(config.idle_font, L"Segoe UI") == 0);
     double width;
     double height;
@@ -121,6 +124,9 @@ static void test_persistence(void) {
     saved.settings_on_start = false;
     saved.hide_fullscreen = false;
     saved.media_source = false;
+    saved.headphone_alerts = false;
+    saved.headphone_battery = false;
+    saved.headphone_alert_ms = 7500;
     saved.colors[TINT_ACCENT] = 0x123abc;
     CHECK(config_save(&saved, path));
     AppConfig loaded;
@@ -136,6 +142,9 @@ static void test_persistence(void) {
     CHECK(!loaded.settings_on_start);
     CHECK(!loaded.hide_fullscreen);
     CHECK(!loaded.media_source);
+    CHECK(!loaded.headphone_alerts);
+    CHECK(!loaded.headphone_battery);
+    CHECK(loaded.headphone_alert_ms == 7500);
     CHECK(WritePrivateProfileStringW(L"DynamicWindows", L"idle_width", L"nan", path));
     CHECK(WritePrivateProfileStringW(L"DynamicWindows", L"frame_rate", L"99999999999999999", path));
     CHECK(WritePrivateProfileStringW(L"DynamicWindows", L"opacity", L"garbage", path));
