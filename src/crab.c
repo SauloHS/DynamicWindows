@@ -336,6 +336,17 @@ bool crab_key_delete(void) {
     return GetLastError() == ERROR_NOT_FOUND;
 }
 
+static void request_cancel(CrabService *service) {
+    if (!service || !service->lock_ready)
+        return;
+    EnterCriticalSection(&service->lock);
+    HINTERNET request = (HINTERNET)service->active_request;
+    service->active_request = NULL;
+    LeaveCriticalSection(&service->lock);
+    if (request)
+        WinHttpCloseHandle(request);
+}
+
 static void post_state(CrabService *service, CrabState state, HRESULT error,
                        const wchar_t *transcript, const wchar_t *answer) {
     if (!service || !service->window ||
@@ -613,12 +624,16 @@ static HRESULT ask_claude(CrabService *service, const wchar_t *question, wchar_t
     SecureZeroMemory(key, sizeof(key));
     SecureZeroMemory(body, (size_t)body_size + 1);
     free(body);
+    bool own_request = true;
     if (service->lock_ready)
         EnterCriticalSection(&service->lock);
-    service->active_request = NULL;
+    if (service->active_request == request)
+        service->active_request = NULL;
+    else
+        own_request = false;
     if (service->lock_ready)
         LeaveCriticalSection(&service->lock);
-    if (request)
+    if (own_request && request)
         WinHttpCloseHandle(request);
     if (connection)
         WinHttpCloseHandle(connection);
@@ -768,8 +783,8 @@ void crab_cancel(CrabService *service) {
     if (!service)
         return;
     InterlockedExchange(&service->cancel_request, 1);
-    InterlockedExchange(&service->cancel_request, 1);
     InterlockedExchange(&service->listening, 0);
+    request_cancel(service);
     if (service->wake)
         SetEvent(service->wake);
 }
@@ -781,6 +796,7 @@ void crab_stop(CrabService *service) {
         return;
     InterlockedExchange(&service->cancel_request, 1);
     InterlockedExchange(&service->listening, 0);
+    request_cancel(service);
     if (service->stop)
         SetEvent(service->stop);
     if (service->wake)
