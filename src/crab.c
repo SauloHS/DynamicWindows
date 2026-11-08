@@ -1,5 +1,6 @@
 #include "crab.h"
 
+#include <roapi.h>
 #include <sapi.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,8 +9,103 @@
 #include <wctype.h>
 #include <wincred.h>
 #include <winhttp.h>
+#include <winstring.h>
 
 #define CRAB_MAX_RESPONSE (1024 * 1024)
+
+#define ABI_OBJECT(name)                                                                           \
+    typedef struct name name;                                                                      \
+    typedef struct name##Vtbl name##Vtbl;                                                          \
+    struct name {                                                                                  \
+        const name##Vtbl *lpVtbl;                                                                  \
+    }
+
+#define ABI_INSPECTABLE(name)                                                                      \
+    HRESULT(STDMETHODCALLTYPE *QueryInterface)(name *, REFIID, void **);                           \
+    ULONG(STDMETHODCALLTYPE *AddRef)(name *);                                                      \
+    ULONG(STDMETHODCALLTYPE *Release)(name *);                                                     \
+    HRESULT(STDMETHODCALLTYPE *GetIids)(name *, ULONG *, IID **);                                  \
+    HRESULT(STDMETHODCALLTYPE *GetRuntimeClassName)(name *, HSTRING *);                            \
+    HRESULT(STDMETHODCALLTYPE *GetTrustLevel)(name *, TrustLevel *)
+
+typedef INT32 CrabAsyncStatus;
+typedef INT32 CrabRecognitionStatus;
+ABI_OBJECT(CrabRecognizer);
+ABI_OBJECT(CrabCompilationOperation);
+ABI_OBJECT(CrabCompilationResult);
+ABI_OBJECT(CrabRecognitionOperation);
+ABI_OBJECT(CrabRecognitionResult);
+ABI_OBJECT(CrabAsyncInfo);
+ABI_OBJECT(CrabClosable);
+
+struct CrabRecognizerVtbl {
+    ABI_INSPECTABLE(CrabRecognizer);
+    HRESULT(STDMETHODCALLTYPE *CurrentLanguage)(CrabRecognizer *, IInspectable **);
+    HRESULT(STDMETHODCALLTYPE *Constraints)(CrabRecognizer *, IInspectable **);
+    HRESULT(STDMETHODCALLTYPE *Timeouts)(CrabRecognizer *, IInspectable **);
+    HRESULT(STDMETHODCALLTYPE *UIOptions)(CrabRecognizer *, IInspectable **);
+    HRESULT(STDMETHODCALLTYPE *CompileConstraints)(CrabRecognizer *, CrabCompilationOperation **);
+    HRESULT(STDMETHODCALLTYPE *Recognize)(CrabRecognizer *, CrabRecognitionOperation **);
+};
+
+struct CrabCompilationOperationVtbl {
+    ABI_INSPECTABLE(CrabCompilationOperation);
+    HRESULT(STDMETHODCALLTYPE *PutCompleted)(CrabCompilationOperation *, IUnknown *);
+    HRESULT(STDMETHODCALLTYPE *GetCompleted)(CrabCompilationOperation *, IUnknown **);
+    HRESULT(STDMETHODCALLTYPE *GetResults)(CrabCompilationOperation *, CrabCompilationResult **);
+};
+
+struct CrabCompilationResultVtbl {
+    ABI_INSPECTABLE(CrabCompilationResult);
+    HRESULT(STDMETHODCALLTYPE *Status)(CrabCompilationResult *, CrabRecognitionStatus *);
+};
+
+struct CrabRecognitionOperationVtbl {
+    ABI_INSPECTABLE(CrabRecognitionOperation);
+    HRESULT(STDMETHODCALLTYPE *PutCompleted)(CrabRecognitionOperation *, IUnknown *);
+    HRESULT(STDMETHODCALLTYPE *GetCompleted)(CrabRecognitionOperation *, IUnknown **);
+    HRESULT(STDMETHODCALLTYPE *GetResults)(CrabRecognitionOperation *, CrabRecognitionResult **);
+};
+
+struct CrabRecognitionResultVtbl {
+    ABI_INSPECTABLE(CrabRecognitionResult);
+    HRESULT(STDMETHODCALLTYPE *Status)(CrabRecognitionResult *, CrabRecognitionStatus *);
+    HRESULT(STDMETHODCALLTYPE *Text)(CrabRecognitionResult *, HSTRING *);
+};
+
+struct CrabAsyncInfoVtbl {
+    ABI_INSPECTABLE(CrabAsyncInfo);
+    HRESULT(STDMETHODCALLTYPE *Id)(CrabAsyncInfo *, UINT32 *);
+    HRESULT(STDMETHODCALLTYPE *Status)(CrabAsyncInfo *, CrabAsyncStatus *);
+    HRESULT(STDMETHODCALLTYPE *Error)(CrabAsyncInfo *, HRESULT *);
+    HRESULT(STDMETHODCALLTYPE *Cancel)(CrabAsyncInfo *);
+    HRESULT(STDMETHODCALLTYPE *Close)(CrabAsyncInfo *);
+};
+
+struct CrabClosableVtbl {
+    ABI_INSPECTABLE(CrabClosable);
+    HRESULT(STDMETHODCALLTYPE *Close)(CrabClosable *);
+};
+
+static const IID crab_recognizer_iid = {
+    0x0bc3c9cb, 0xc26a, 0x40f2, {0xae, 0xb5, 0x80, 0x96, 0xb2, 0xe4, 0x80, 0x73}};
+static const IID crab_async_info_iid = {
+    0x00000036, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
+static const IID crab_closable_iid = {
+    0x30d5a829, 0x7fa4, 0x4026, {0x83, 0xbb, 0xd7, 0x5b, 0xae, 0x4e, 0xa9, 0x9e}};
+
+#define ABI_SLOT(type, member, slot)                                                               \
+    _Static_assert(offsetof(type##Vtbl, member) == (slot) * sizeof(void *), "WinRT ABI slot")
+ABI_SLOT(CrabRecognizer, CompileConstraints, 10);
+ABI_SLOT(CrabRecognizer, Recognize, 11);
+ABI_SLOT(CrabCompilationOperation, GetResults, 8);
+ABI_SLOT(CrabCompilationResult, Status, 6);
+ABI_SLOT(CrabRecognitionOperation, GetResults, 8);
+ABI_SLOT(CrabRecognitionResult, Status, 6);
+ABI_SLOT(CrabRecognitionResult, Text, 7);
+ABI_SLOT(CrabAsyncInfo, Status, 7);
+ABI_SLOT(CrabAsyncInfo, Cancel, 9);
+ABI_SLOT(CrabClosable, Close, 6);
 
 static const wchar_t user_agent[] = L"DynamicWindows/0.1 Crab";
 
@@ -506,119 +602,146 @@ static void post_state(CrabService *service, CrabState state, HRESULT error,
         free(message);
 }
 
-static void speech_close(ISpRecognizer *recognizer, ISpRecoContext *context,
-                         ISpRecoGrammar *grammar);
-
-static HRESULT speech_open(ISpRecognizer **recognizer, ISpRecoContext **context,
-                           ISpRecoGrammar **grammar) {
-    *recognizer = NULL;
-    *context = NULL;
-    *grammar = NULL;
-    HRESULT result = CoCreateInstance(&CLSID_SpSharedRecognizer, NULL, CLSCTX_ALL,
-                                      &IID_ISpRecognizer, (void **)recognizer);
-    if (SUCCEEDED(result))
-        result = ISpRecognizer_CreateRecoContext(*recognizer, context);
-    if (SUCCEEDED(result))
-        result = ISpRecoContext_SetNotifyWin32Event(*context);
-    if (SUCCEEDED(result)) {
-        ULONGLONG interest = SPFEI(SPEI_RECOGNITION);
-        result = ISpRecoContext_SetInterest(*context, interest, interest);
+static HRESULT modern_wait(CrabService *service, IUnknown *operation, DWORD timeout) {
+    CrabAsyncInfo *info = NULL;
+    HRESULT result = IUnknown_QueryInterface(operation, &crab_async_info_iid, (void **)&info);
+    if (FAILED(result))
+        return result;
+    uint64_t deadline = GetTickCount64() + timeout;
+    CrabAsyncStatus status = 0;
+    while (GetTickCount64() < deadline) {
+        result = info->lpVtbl->Status(info, &status);
+        if (FAILED(result) || status != 0)
+            break;
+        if (WaitForSingleObject(service->stop, 20) == WAIT_OBJECT_0 ||
+            InterlockedCompareExchange(&service->cancel_request, 0, 0)) {
+            info->lpVtbl->Cancel(info);
+            result = E_ABORT;
+            break;
+        }
     }
+    if (SUCCEEDED(result) && status == 3) {
+        HRESULT error = E_FAIL;
+        HRESULT error_result = info->lpVtbl->Error(info, &error);
+        result = FAILED(error_result) ? error_result : error;
+    } else if (SUCCEEDED(result) && status == 2) {
+        result = E_ABORT;
+    } else if (SUCCEEDED(result) && status == 0) {
+        info->lpVtbl->Cancel(info);
+        result = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+    }
+    info->lpVtbl->Release(info);
+    return result;
+}
+
+static void modern_close(IUnknown *operation) {
+    CrabAsyncInfo *info = NULL;
+    if (SUCCEEDED(IUnknown_QueryInterface(operation, &crab_async_info_iid, (void **)&info))) {
+        info->lpVtbl->Close(info);
+        info->lpVtbl->Release(info);
+    }
+}
+
+static HRESULT modern_compile(CrabService *service, CrabRecognizer *recognizer) {
+    CrabCompilationOperation *operation = NULL;
+    CrabCompilationResult *compilation = NULL;
+    HRESULT result = recognizer->lpVtbl->CompileConstraints(recognizer, &operation);
+    if (SUCCEEDED(result) && !operation)
+        result = E_FAIL;
     if (SUCCEEDED(result))
-        result = ISpRecoContext_CreateGrammar(*context, 1, grammar);
+        result = modern_wait(service, (IUnknown *)operation, 12000);
     if (SUCCEEDED(result))
-        result = ISpRecoGrammar_LoadDictation(*grammar, NULL, SPLO_STATIC);
-    if (SUCCEEDED(result))
-        result = ISpRecoGrammar_SetDictationState(*grammar, SPRS_INACTIVE);
-    if (FAILED(result)) {
-        speech_close(*recognizer, *context, *grammar);
-        *recognizer = NULL;
-        *context = NULL;
-        *grammar = NULL;
+        result = operation->lpVtbl->GetResults(operation, &compilation);
+    if (SUCCEEDED(result) && compilation) {
+        CrabRecognitionStatus status = 6;
+        result = compilation->lpVtbl->Status(compilation, &status);
+        if (SUCCEEDED(result) && status != 0)
+            result = status == 5                  ? E_ABORT
+                     : status == 7 || status == 8 ? HRESULT_FROM_WIN32(ERROR_TIMEOUT)
+                     : status == 10               ? HRESULT_FROM_WIN32(ERROR_DEVICE_NOT_AVAILABLE)
+                                                  : HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+    }
+    if (compilation)
+        compilation->lpVtbl->Release(compilation);
+    if (operation) {
+        modern_close((IUnknown *)operation);
+        operation->lpVtbl->Release(operation);
     }
     return result;
 }
 
-static void speech_close(ISpRecognizer *recognizer, ISpRecoContext *context,
-                         ISpRecoGrammar *grammar) {
-    if (grammar) {
-        ISpRecoGrammar_SetDictationState(grammar, SPRS_INACTIVE);
-        ISpRecoGrammar_Release(grammar);
-    }
-    if (context)
-        ISpRecoContext_Release(context);
-    if (recognizer)
-        ISpRecognizer_Release(recognizer);
+static HRESULT modern_operation_wait(CrabService *service, CrabRecognitionOperation *operation,
+                                     DWORD timeout, CrabRecognitionResult **recognition) {
+    HRESULT result = modern_wait(service, (IUnknown *)operation, timeout);
+    if (SUCCEEDED(result))
+        result = operation->lpVtbl->GetResults(operation, recognition);
+    return result;
 }
 
-static bool recognition_read(ISpRecoContext *context, wchar_t *text, size_t count) {
-    SPEVENT event = {0};
-    ULONG fetched = 0;
-    while (SUCCEEDED(ISpRecoContext_GetEvents(context, 1, &event, &fetched)) && fetched) {
-        if (event.eEventId == SPEI_RECOGNITION && event.elParamType == SPET_LPARAM_IS_OBJECT &&
-            event.lParam) {
-            ISpRecoResult *recognition = (ISpRecoResult *)event.lParam;
-            wchar_t *recognized = NULL;
-            HRESULT status =
-                ISpRecoResult_GetText(recognition, 0, SPPR_ALL_ELEMENTS, TRUE, &recognized, NULL);
-            if (SUCCEEDED(status) && recognized) {
-                wcsncpy(text, recognized, count - 1);
-                text[count - 1] = L'\0';
-                CoTaskMemFree(recognized);
+static HRESULT modern_listen_once(CrabService *service, wchar_t *text, size_t count) {
+    static const wchar_t class_name[] = L"Windows.Media.SpeechRecognition.SpeechRecognizer";
+    HSTRING name = NULL;
+    HRESULT result = WindowsCreateString(
+        class_name, (UINT32)(sizeof(class_name) / sizeof(class_name[0]) - 1), &name);
+    IInspectable *instance = NULL;
+    CrabRecognizer *recognizer = NULL;
+    CrabRecognitionOperation *operation = NULL;
+    CrabRecognitionResult *recognition = NULL;
+    if (SUCCEEDED(result))
+        result = RoActivateInstance(name, &instance);
+    if (SUCCEEDED(result))
+        result = IInspectable_QueryInterface(instance, &crab_recognizer_iid, (void **)&recognizer);
+    if (SUCCEEDED(result))
+        result = modern_compile(service, recognizer);
+    if (SUCCEEDED(result))
+        result = recognizer->lpVtbl->Recognize(recognizer, &operation);
+    if (SUCCEEDED(result) && !operation)
+        result = E_FAIL;
+    if (SUCCEEDED(result))
+        result = modern_operation_wait(service, operation, 12000, &recognition);
+    if (SUCCEEDED(result) && recognition) {
+        CrabRecognitionStatus status = 6;
+        result = recognition->lpVtbl->Status(recognition, &status);
+        if (SUCCEEDED(result) && status == 0) {
+            HSTRING value = NULL;
+            result = recognition->lpVtbl->Text(recognition, &value);
+            if (SUCCEEDED(result) && value) {
+                UINT32 length = 0;
+                const wchar_t *source = WindowsGetStringRawBuffer(value, &length);
+                size_t copied = source && length < count - 1 ? length : source ? count - 1 : 0;
+                if (copied)
+                    wmemcpy(text, source, copied);
+                text[copied] = L'\0';
+                WindowsDeleteString(value);
             }
-            ISpRecoResult_Release(recognition);
-            return *text != L'\0';
-        }
-        if (event.elParamType == SPET_LPARAM_IS_OBJECT && event.lParam)
-            IUnknown_Release((IUnknown *)event.lParam);
-        else if (event.elParamType == SPET_LPARAM_IS_POINTER && event.lParam)
-            CoTaskMemFree((void *)event.lParam);
-        else if (event.elParamType == SPET_LPARAM_IS_STRING && event.lParam)
-            CoTaskMemFree((void *)event.lParam);
-    }
-    return false;
-}
-
-static HRESULT listen_once(CrabService *service, ISpRecoContext *context, ISpRecoGrammar *grammar,
-                           wchar_t *text, size_t count) {
-    SPEVENT stale = {0};
-    ULONG fetched = 0;
-    while (SUCCEEDED(ISpRecoContext_GetEvents(context, 1, &stale, &fetched)) && fetched) {
-        if (stale.elParamType == SPET_LPARAM_IS_OBJECT && stale.lParam)
-            IUnknown_Release((IUnknown *)stale.lParam);
-        else if ((stale.elParamType == SPET_LPARAM_IS_POINTER ||
-                  stale.elParamType == SPET_LPARAM_IS_STRING) &&
-                 stale.lParam)
-            CoTaskMemFree((void *)stale.lParam);
-        fetched = 0;
-    }
-    HANDLE event = ISpRecoContext_GetNotifyEventHandle(context);
-    if (!event || event == INVALID_HANDLE_VALUE)
-        return E_FAIL;
-    HRESULT result = ISpRecoGrammar_SetDictationState(grammar, SPRS_ACTIVE);
-    if (FAILED(result))
-        return result;
-    uint64_t deadline = GetTickCount64() + 12000;
-    HANDLE events[] = {service->stop, service->wake, event};
-    while (GetTickCount64() < deadline) {
-        DWORD wait = WaitForMultipleObjects(3, events, FALSE, 250);
-        if (wait == WAIT_OBJECT_0 || InterlockedCompareExchange(&service->cancel_request, 0, 0)) {
-            result = E_ABORT;
-            break;
-        }
-        if (wait == WAIT_OBJECT_0 + 2 && recognition_read(context, text, count)) {
-            result = S_OK;
-            break;
-        }
-        if (wait == WAIT_FAILED) {
-            result = HRESULT_FROM_WIN32(GetLastError());
-            break;
+        } else if (SUCCEEDED(result)) {
+            result = status == 5                  ? E_ABORT
+                     : status == 7 || status == 8 ? HRESULT_FROM_WIN32(ERROR_TIMEOUT)
+                     : status == 10               ? HRESULT_FROM_WIN32(ERROR_DEVICE_NOT_AVAILABLE)
+                                                  : HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
         }
     }
-    ISpRecoGrammar_SetDictationState(grammar, SPRS_INACTIVE);
+    if (recognition)
+        recognition->lpVtbl->Release(recognition);
+    if (operation) {
+        modern_close((IUnknown *)operation);
+        operation->lpVtbl->Release(operation);
+    }
+    if (recognizer) {
+        CrabClosable *closable = NULL;
+        if (SUCCEEDED(recognizer->lpVtbl->QueryInterface(recognizer, &crab_closable_iid,
+                                                         (void **)&closable))) {
+            closable->lpVtbl->Close(closable);
+            closable->lpVtbl->Release(closable);
+        }
+        recognizer->lpVtbl->Release(recognizer);
+    }
+    if (instance)
+        IInspectable_Release(instance);
+    if (name)
+        WindowsDeleteString(name);
     return *text ? result : FAILED(result) ? result : HRESULT_FROM_WIN32(ERROR_TIMEOUT);
 }
-
 static bool response_read(HINTERNET request, char **response) {
     *response = NULL;
     size_t used = 0;
@@ -822,12 +945,8 @@ static void speak_answer(CrabService *service, const wchar_t *answer) {
 
 static DWORD WINAPI crab_thread(void *argument) {
     CrabService *service = argument;
-    HRESULT initialized = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
-    ISpRecognizer *recognizer = NULL;
-    ISpRecoContext *context = NULL;
-    ISpRecoGrammar *grammar = NULL;
-    HRESULT speech =
-        SUCCEEDED(initialized) ? speech_open(&recognizer, &context, &grammar) : initialized;
+    HRESULT initialized = RoInitialize(RO_INIT_MULTITHREADED);
+    HRESULT speech = initialized;
     HANDLE events[] = {service->stop, service->wake};
     while (WaitForSingleObject(service->stop, 0) != WAIT_OBJECT_0) {
         if (WaitForMultipleObjects(2, events, FALSE, INFINITE) == WAIT_OBJECT_0)
@@ -844,7 +963,7 @@ static DWORD WINAPI crab_thread(void *argument) {
         }
         post_state(service, CRAB_LISTENING, S_OK, NULL, NULL);
         wchar_t transcript[768] = {0};
-        HRESULT result = listen_once(service, context, grammar, transcript, 768);
+        HRESULT result = modern_listen_once(service, transcript, 768);
         if (FAILED(result)) {
             if (result != E_ABORT)
                 post_state(service, CRAB_ERROR, result, transcript, NULL);
@@ -882,9 +1001,8 @@ static DWORD WINAPI crab_thread(void *argument) {
         InterlockedExchange(&service->busy, 0);
         post_state(service, CRAB_IDLE, S_OK, transcript, answer);
     }
-    speech_close(recognizer, context, grammar);
     if (SUCCEEDED(initialized))
-        CoUninitialize();
+        RoUninitialize();
     return 0;
 }
 
