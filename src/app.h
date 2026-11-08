@@ -150,6 +150,7 @@ typedef struct App {
     POINT base_position;
     uint64_t event_until;
     uint64_t media_peek_until;
+    uint64_t crab_orb_until;
     bool initialized;
     double scale;
     double canvas_width;
@@ -235,6 +236,7 @@ const HeadphoneDevice *app_headphones(const App *app);
 void app_media_name(const App *app, wchar_t *text, size_t count);
 void app_idle_label(const App *app, wchar_t *text, size_t count);
 void app_summary(const App *app, wchar_t *text, size_t count);
+void app_crab_error_text(HRESULT error, wchar_t *text, size_t count);
 void app_clock(uint64_t milliseconds, wchar_t *text, size_t count);
 IAccessible *accessibility_create(App *app);
 void accessibility_disconnect(App *app);

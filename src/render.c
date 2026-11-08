@@ -639,11 +639,24 @@ static void compact(App *app, bool add_hits) {
     Renderer *renderer = &app->renderer;
     RectF body = renderer->body;
     double middle = body.Y + body.Height / 2;
-    if (app->crab_state == CRAB_LISTENING || app->crab_state == CRAB_THINKING ||
-        app->crab_state == CRAB_SPEAKING) {
+    bool crab_orb_visible = app->crab_state == CRAB_LISTENING || app->crab_state == CRAB_THINKING ||
+                            app->crab_state == CRAB_SPEAKING ||
+                            GetTickCount64() < app->crab_orb_until;
+    if (crab_orb_visible) {
         crab_orb(app);
         if (add_hits)
             hit_add(app, body, ACTION_CRAB, true, L"Cancel Crab voice assistant");
+        return;
+    }
+    if (app->crab_state == CRAB_ERROR) {
+        wchar_t error[160];
+        app_crab_error_text(app->crab_error, error, 160);
+        text(renderer, L"Crab error", (RectF){body.X + 18, body.Y + 8, body.Width - 36, 24},
+             FONT_LABEL, COLOR_TEXT, StringAlignmentCenter);
+        text(renderer, error, (RectF){body.X + 18, body.Y + 33, body.Width - 36, 28}, FONT_SMALL,
+             COLOR_SECONDARY, StringAlignmentCenter);
+        if (add_hits)
+            hit_add(app, body, ACTION_SETTINGS, true, L"Open Crab settings");
         return;
     }
     wchar_t label[600];
@@ -1264,7 +1277,7 @@ bool renderer_draw(App *app) {
     RectF body = renderer->body;
     double opacity = renderer->opacity;
     bool crab_active = app->crab_state == CRAB_LISTENING || app->crab_state == CRAB_THINKING ||
-                       app->crab_state == CRAB_SPEAKING;
+                       app->crab_state == CRAB_SPEAKING || GetTickCount64() < app->crab_orb_until;
     if (!crab_active) {
         renderer->opacity *= renderer->shadow;
         for (int i = 3; i >= 1; --i)
@@ -1408,7 +1421,7 @@ bool app_inside(const App *app, double x, double y) {
     const Renderer *renderer = &app->renderer;
     RectF body = renderer->body;
     bool crab_active = app->crab_state == CRAB_LISTENING || app->crab_state == CRAB_THINKING ||
-                       app->crab_state == CRAB_SPEAKING;
+                       app->crab_state == CRAB_SPEAKING || GetTickCount64() < app->crab_orb_until;
     if (crab_active) {
         double diameter = fmin(body.Width, body.Height);
         double orb_x = body.X + (body.Width - diameter) / 2;

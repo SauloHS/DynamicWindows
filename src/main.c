@@ -56,6 +56,18 @@ typedef struct {
     unsigned target;
 } MonitorMenu;
 
+void app_crab_error_text(HRESULT error, wchar_t *text, size_t count) {
+    DWORD code = HRESULT_CODE(error);
+    const wchar_t *message =
+        code == ERROR_NOT_FOUND           ? L"API key missing for this endpoint"
+        : code == ERROR_TIMEOUT           ? L"Listening or provider request timed out"
+        : code == ERROR_BUSY              ? L"Crab is already handling a request"
+        : code == ERROR_INVALID_PARAMETER ? L"Provider, base URL, or model is invalid"
+        : code >= 400 && code <= 599      ? L"Provider rejected the request"
+                                          : L"Speech recognition or provider failed";
+    swprintf(text, count, L"%ls", message);
+}
+
 void app_clock(uint64_t milliseconds, wchar_t *text, size_t count) {
     uint64_t seconds = milliseconds / 1000 + (milliseconds % 1000 != 0);
     unsigned long long hours = seconds / 3600;
@@ -68,8 +80,14 @@ void app_clock(uint64_t milliseconds, wchar_t *text, size_t count) {
 }
 
 void app_summary(const App *app, wchar_t *text, size_t count) {
+    if (app->crab_state == CRAB_ERROR) {
+        wchar_t error[160];
+        app_crab_error_text(app->crab_error, error, 160);
+        swprintf(text, count, L"DynamicWindows. %ls error. %ls.", app->config.crab_name, error);
+        return;
+    }
     if (app->crab_state == CRAB_LISTENING || app->crab_state == CRAB_THINKING ||
-        app->crab_state == CRAB_SPEAKING || app->crab_state == CRAB_ERROR) {
+        app->crab_state == CRAB_SPEAKING) {
         swprintf(text, count, L"DynamicWindows. %ls. %ls.", app->config.crab_name,
                  crab_state_text(app->crab_state));
         return;
@@ -244,8 +262,9 @@ const HeadphoneDevice *app_headphones(const App *app) {
 
 IslandSize app_target_size(const App *app) {
     const AppConfig *config = &app->config;
-    if (app->crab_state == CRAB_LISTENING || app->crab_state == CRAB_THINKING ||
-        app->crab_state == CRAB_SPEAKING)
+    bool crab_orb = app->crab_state == CRAB_LISTENING || app->crab_state == CRAB_THINKING ||
+                    app->crab_state == CRAB_SPEAKING || GetTickCount64() < app->crab_orb_until;
+    if (crab_orb)
         return (IslandSize){72, 72, 36, 0, 0};
     if (app->island.expanded)
         return (IslandSize){config->expanded_width, config->expanded_height,
@@ -721,6 +740,7 @@ void app_action(App *app, Action action, double value) {
             return;
         }
         app->event_until = UINT64_MAX;
+        app->crab_orb_until = GetTickCount64() + 700;
         app->crab_error = S_OK;
         app->crab_transcript[0] = L'\0';
         app->crab_answer[0] = L'\0';
@@ -977,11 +997,15 @@ static void crab_receive(App *app, CrabMessage *message) {
     if (*message->answer)
         wcsncpy(app->crab_answer, message->answer, 2047);
     free(message);
-    if (app->crab_state == CRAB_IDLE || app->crab_state == CRAB_ERROR)
-        app->event_until =
-            GetTickCount64() + (uint64_t)(app->crab_state == CRAB_ERROR ? 5000 : 2200);
-    else
+    if (app->crab_state == CRAB_ERROR) {
+        app->crab_orb_until = GetTickCount64() + 700;
+        app->event_until = GetTickCount64() + 5000;
+    } else if (app->crab_state == CRAB_IDLE) {
+        app->crab_orb_until = 0;
+        app->event_until = GetTickCount64() + 2200;
+    } else {
         app->event_until = UINT64_MAX;
+    }
     NotifyWinEvent(EVENT_OBJECT_NAMECHANGE, app->window, OBJID_CLIENT, CHILDID_SELF);
     app_animate(app);
     app_render(app);
@@ -1099,7 +1123,7 @@ static void frame(App *app) {
         tray_tooltip(app);
     }
     bool crab_visible = app->crab_state == CRAB_LISTENING || app->crab_state == CRAB_THINKING ||
-                        app->crab_state == CRAB_SPEAKING;
+                        app->crab_state == CRAB_SPEAKING || now < app->crab_orb_until;
     notifications_tick(&app->notification_service);
     if (now - app->last_poll >= 50) {
         system_poll(app, now);
@@ -1127,9 +1151,7 @@ static void frame(App *app) {
     moving |= island_spring_tuned(&app->reveal, app->island.expanded ? 1 : 0, seconds,
                                   app->reduced_motion, response, 100);
     double smooth = 1 - exp(-island_clamp(seconds, 0, 0.1) * 16);
-    if (!app->reduced_motion &&
-        (app->crab_state == CRAB_LISTENING || app->crab_state == CRAB_THINKING ||
-         app->crab_state == CRAB_SPEAKING))
+    if (!app->reduced_motion && crab_visible)
         app->crab_phase = fmod(app->crab_phase + seconds * 1.7, 6.28318530718);
     for (int i = 0; i < 5; ++i)
         app->wave_levels[i] += (app->peaks[i * 2] - app->wave_levels[i]) * smooth;
@@ -1161,9 +1183,7 @@ static void frame(App *app) {
     bool active_motion = (app->media.playing && app->config.show_media &&
                           ((!app->reduced_motion && app->config.waveform) ||
                            (app->island.expanded && app->config.media_progress))) ||
-                         (!app->reduced_motion &&
-                          (app->crab_state == CRAB_LISTENING || app->crab_state == CRAB_THINKING ||
-                           app->crab_state == CRAB_SPEAKING));
+                         (!app->reduced_motion && crab_visible);
     unsigned interval = moving || (drawing && active_motion)
                             ? (unsigned)lround(1000.0 / app->config.frame_rate)
                         : drawing ? 50
@@ -1665,6 +1685,12 @@ static int smoke_test(App *app, const wchar_t *directory) {
     passed &= smoke_frame(app, directory, L"crab-thinking");
     app->crab_state = CRAB_SPEAKING;
     passed &= smoke_frame(app, directory, L"crab-speaking");
+    app->crab_state = CRAB_ERROR;
+    app->crab_error = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+    app->crab_orb_until = GetTickCount64() + 700;
+    passed &= smoke_frame(app, directory, L"crab-error-orb");
+    app->crab_orb_until = 0;
+    passed &= smoke_frame(app, directory, L"crab-error-text");
     app->crab_state = CRAB_DISABLED;
     island_open(&app->island, ISLAND_MEDIA);
     passed &= smoke_frame(app, directory, L"media-empty");
@@ -1775,7 +1801,8 @@ static int smoke_test(App *app, const wchar_t *directory) {
     report = _wfopen(path, L"w");
     if (report) {
         fprintf(report,
-                "%s: 21 native render states, layout, alpha hit-testing, MSAA names and roles\n",
+                "%s: 23 native render states, layout, Crab error states, alpha hit-testing, MSAA "
+                "names and roles\n",
                 passed ? "PASS" : "FAIL");
         fclose(report);
     } else {
