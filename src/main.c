@@ -58,14 +58,26 @@ typedef struct {
 
 void app_crab_error_text(HRESULT error, wchar_t *text, size_t count) {
     DWORD code = HRESULT_CODE(error);
-    const wchar_t *message =
-        code == ERROR_NOT_FOUND           ? L"API key missing for this endpoint"
-        : code == ERROR_TIMEOUT           ? L"Listening or provider request timed out"
-        : code == ERROR_BUSY              ? L"Crab is already handling a request"
-        : code == ERROR_INVALID_PARAMETER ? L"Provider, base URL, or model is invalid"
-        : code >= 400 && code <= 599      ? L"Provider rejected the request"
-                                          : L"Speech recognition or provider failed";
-    swprintf(text, count, L"%ls", message);
+    const wchar_t *message;
+    if (error == REGDB_E_CLASSNOTREG)
+        message = L"Windows Speech Recognition is not installed for this language";
+    else if (error == E_ACCESSDENIED)
+        message = L"Microphone or provider access was denied";
+    else if (code == ERROR_NOT_FOUND)
+        message = L"API key missing for this provider endpoint";
+    else if (code == ERROR_TIMEOUT)
+        message = L"Listening or provider request timed out";
+    else if (code == ERROR_BUSY)
+        message = L"Crab is already handling a request";
+    else if (code == ERROR_INVALID_PARAMETER)
+        message = L"Provider, base URL, or model is invalid";
+    else if (code == ERROR_INVALID_DATA)
+        message = L"Speech or provider returned unreadable data";
+    else if (code >= 400 && code <= 599)
+        message = L"Provider rejected the request";
+    else
+        message = L"Windows Speech Recognition could not start";
+    swprintf(text, count, L"%ls (0x%08lX)", message, (unsigned long)error);
 }
 
 void app_clock(uint64_t milliseconds, wchar_t *text, size_t count) {
@@ -266,6 +278,9 @@ IslandSize app_target_size(const App *app) {
                     app->crab_state == CRAB_SPEAKING || GetTickCount64() < app->crab_orb_until;
     if (crab_orb)
         return (IslandSize){72, 72, 36, 0, 0};
+    if (app->crab_state == CRAB_ERROR)
+        return (IslandSize){config->alert_width, config->alert_height, config->alert_height / 2, 0,
+                            0};
     if (app->island.expanded)
         return (IslandSize){config->expanded_width, config->expanded_height,
                             config->expanded_radius, 0, 0};
@@ -1690,6 +1705,9 @@ static int smoke_test(App *app, const wchar_t *directory) {
     app->crab_orb_until = GetTickCount64() + 700;
     passed &= smoke_frame(app, directory, L"crab-error-orb");
     app->crab_orb_until = 0;
+    IslandSize crab_error_size = app_target_size(app);
+    passed &= crab_error_size.width == app->config.alert_width;
+    passed &= crab_error_size.height == app->config.alert_height;
     passed &= smoke_frame(app, directory, L"crab-error-text");
     app->crab_state = CRAB_DISABLED;
     island_open(&app->island, ISLAND_MEDIA);

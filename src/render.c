@@ -649,12 +649,14 @@ static void compact(App *app, bool add_hits) {
         return;
     }
     if (app->crab_state == CRAB_ERROR) {
-        wchar_t error[160];
-        app_crab_error_text(app->crab_error, error, 160);
-        text(renderer, L"Crab error", (RectF){body.X + 18, body.Y + 8, body.Width - 36, 24},
-             FONT_LABEL, COLOR_TEXT, StringAlignmentCenter);
-        text(renderer, error, (RectF){body.X + 18, body.Y + 33, body.Width - 36, 28}, FONT_SMALL,
-             COLOR_SECONDARY, StringAlignmentCenter);
+        wchar_t error[220];
+        app_crab_error_text(app->crab_error, error, 220);
+        glyph(renderer, GLYPH_CLOSE, body.X + 34, middle, 22, COLOR_TIMER);
+        text(renderer, L"Crab couldn't start",
+             (RectF){body.X + 62, body.Y + 8, body.Width - 82, 24}, FONT_LABEL, COLOR_TEXT,
+             StringAlignmentNear);
+        text(renderer, error, (RectF){body.X + 62, body.Y + 34, body.Width - 82, 29}, FONT_SMALL,
+             COLOR_SECONDARY, StringAlignmentNear);
         if (add_hits)
             hit_add(app, body, ACTION_SETTINGS, true, L"Open Crab settings");
         return;
