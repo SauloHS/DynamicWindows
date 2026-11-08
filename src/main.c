@@ -56,28 +56,34 @@ typedef struct {
     unsigned target;
 } MonitorMenu;
 
-void app_crab_error_text(HRESULT error, wchar_t *text, size_t count) {
+void app_crab_error_cause(HRESULT error, wchar_t *text, size_t count) {
     DWORD code = HRESULT_CODE(error);
     const wchar_t *message;
     if (error == REGDB_E_CLASSNOTREG)
-        message = L"Windows Speech Recognition is not installed for this language";
+        message = L"Speech recognizer not installed";
     else if (error == E_ACCESSDENIED)
-        message = L"Microphone or provider access was denied";
+        message = L"Microphone or provider access denied";
     else if (code == ERROR_NOT_FOUND)
-        message = L"API key missing for this provider endpoint";
+        message = L"API key missing for endpoint";
     else if (code == ERROR_TIMEOUT)
-        message = L"Listening or provider request timed out";
+        message = L"Listening or provider timed out";
     else if (code == ERROR_BUSY)
-        message = L"Crab is already handling a request";
+        message = L"Crab is already busy";
     else if (code == ERROR_INVALID_PARAMETER)
-        message = L"Provider, base URL, or model is invalid";
+        message = L"Provider settings are invalid";
     else if (code == ERROR_INVALID_DATA)
-        message = L"Speech or provider returned unreadable data";
+        message = L"Speech or provider data was unreadable";
     else if (code >= 400 && code <= 599)
         message = L"Provider rejected the request";
     else
-        message = L"Windows Speech Recognition could not start";
-    swprintf(text, count, L"%ls (0x%08lX)", message, (unsigned long)error);
+        message = L"Windows Speech Recognition failed";
+    swprintf(text, count, L"%ls", message);
+}
+
+void app_crab_error_text(HRESULT error, wchar_t *text, size_t count) {
+    wchar_t cause[160];
+    app_crab_error_cause(error, cause, 160);
+    swprintf(text, count, L"%ls (0x%08lX)", cause, (unsigned long)error);
 }
 
 void app_clock(uint64_t milliseconds, wchar_t *text, size_t count) {
