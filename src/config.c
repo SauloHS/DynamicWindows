@@ -475,9 +475,9 @@ double config_reference_width(const AppConfig *config) {
     double media = fmax(config->media_width, config->idle_width + config->media_extra_width);
     double compact = fmax(config->idle_width, fmax(media, config->timer_width));
     if (config->headphone_status)
-        compact =
-            fmax(compact,
-                 fmax(config->idle_width + config->media_extra_width, config->timer_width) + 64);
+        compact = fmax(compact,
+                       fmax(config->idle_width + config->media_extra_width, config->timer_width) +
+                           config->media_extra_width);
     return fmax(config->expanded_width,
                 fmax(compact + config->bubble_gap + config->bubble_size, config->alert_width));
 }

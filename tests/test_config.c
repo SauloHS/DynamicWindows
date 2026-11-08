@@ -103,9 +103,11 @@ static void test_placement(void) {
     CHECK(rect.x + margin * 1.5 >= work.x);
     CHECK(rect.y + 16 * 1.5 >= work.y);
     config.media_width = 1000;
+    config.media_extra_width = 73;
+    config.timer_width = 1000;
     config_canvas(&config, &width, &height);
-    CHECK(width > 1100);
-    CHECK(config_reference_width(&config) == 1052);
+    CHECK(width > 1200);
+    CHECK(config_reference_width(&config) == 1125);
 }
 
 static void test_persistence(void) {

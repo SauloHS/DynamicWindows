@@ -239,8 +239,8 @@ IslandSize app_target_size(const App *app) {
     double bubble =
         config->dual_activity && app_secondary(app) != ACTIVITY_NONE ? config->bubble_size : 0;
     const HeadphoneDevice *headphones = app_headphones(app);
-    if (headphones && primary != ACTIVITY_NONE)
-        width += 64;
+    if (headphones)
+        width += config->media_extra_width;
     double height = primary == ACTIVITY_TIMER ? config->timer_height : config->compact_height;
     return (IslandSize){width, height, fmin(config->compact_radius, height / 2), bubble};
 }
@@ -1436,7 +1436,7 @@ static int smoke_test(App *app, const wchar_t *directory) {
     wcscpy(app->headphones.devices[0].id, L"synthetic-earbuds");
     wcscpy(app->headphones.devices[0].name, L"Wireless earbuds");
     passed &= smoke_frame(app, directory, L"headphones-idle");
-    passed &= app_target_size(app).width == app->config.idle_width;
+    passed &= app_target_size(app).width == app->config.idle_width + app->config.media_extra_width;
     passed &= app_target_size(app).height == app->config.compact_height;
     app->headphone_event = (HeadphoneEvent){HEADPHONE_CONNECTED, app->headphones.devices[0]};
     island_show_alert(&app->island, ALERT_HEADPHONES, 0);
