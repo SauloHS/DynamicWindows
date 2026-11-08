@@ -1234,7 +1234,8 @@ bool renderer_draw(App *app) {
     double height = island_clamp(app->height.value, 20, app->canvas_height - 20);
     double bubble = island_clamp(app->bubble.value, 0, app->config.bubble_size * 1.12);
     double current_headphone_size =
-        app_headphones(app) && app_primary(app) != ACTIVITY_NONE ? height : 0;
+        !app->island.expanded && app_headphones(app) && app_primary(app) != ACTIVITY_NONE ? height
+                                                                                          : 0;
     double headphone_bubble = current_headphone_size;
     double headphone_reveal =
         island_clamp(app->headphone_bubble.value / fmax(1, current_headphone_size), 0, 1);

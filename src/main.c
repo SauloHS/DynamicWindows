@@ -1695,6 +1695,9 @@ static int smoke_test(App *app, const wchar_t *directory) {
     passed &= smoke_frame(app, directory, L"dual-activity-headphones");
     island_open(&app->island, ISLAND_MEDIA);
     passed &= smoke_frame(app, directory, L"media-expanded");
+    passed &= app_target_size(app).headphones == 0;
+    passed &= app->renderer.headphone_bubble.Width == 0;
+    passed &= app->renderer.body.X >= 0;
     app->island.timer.remaining = 187000;
     island_open(&app->island, ISLAND_TIMER);
     passed &= smoke_frame(app, directory, L"timer-running");
@@ -1758,7 +1761,8 @@ static int smoke_test(App *app, const wchar_t *directory) {
     swprintf(path, 1024, L"%ls/result.txt", directory);
     report = _wfopen(path, L"w");
     if (report) {
-        fprintf(report, "%s: 21 native render states, alpha hit-testing, MSAA names and roles\n",
+        fprintf(report,
+                "%s: 21 native render states, layout, alpha hit-testing, MSAA names and roles\n",
                 passed ? "PASS" : "FAIL");
         fclose(report);
     } else {
