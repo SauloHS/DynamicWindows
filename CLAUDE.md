@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **DynamicWindows** is a portable, native **C11 / Win32** activity island for Windows 10/11 x64. The public repository is `SauloHS/DynamicWindows`; the license is **GPL-3.0**. Keep application code in C: the custom interface uses GDI+'s flat C API, not C++, Electron, or a browser runtime.
 
-The executable is `build/DynamicWindows.exe`. `MacNotch` is the previous name; remaining references in configuration loading are intentional compatibility support, not unfinished branding.
+The executable is `build/DynamicWindows.exe`. Notification development can use a separate `build-notifications/` directory. `MacNotch` is the previous name; remaining references in configuration loading are intentional compatibility support, not unfinished branding.
 
 ## Build and verification
 
@@ -35,11 +35,15 @@ If the compiler is not on PATH, use `-DCMAKE_C_COMPILER=C:/mingw64/bin/gcc.exe` 
 ```powershell
 ctest --test-dir build -R '^core$' --output-on-failure
 ctest --test-dir build -R '^configuration$' --output-on-failure
+ctest --test-dir build -R '^headphones$' --output-on-failure
+ctest --test-dir build -R '^notifications$' --output-on-failure
 ctest --test-dir build -R '^native_smoke$' --output-on-failure
 ```
 
 - `core`: platform-independent timer, activity priority, geometry, and spring behavior.
 - `configuration`: defaults, validation, placement, malformed input, and Unicode save/load.
+- `headphones`: synthetic connection/battery state; no device interaction.
+- `notifications`: duplicate suppression, sanitation, and access labels; no permission prompt or real notification access.
 - `native_smoke`: launches the actual renderer, writes PNGs to `build/smoke`, and checks transparent hit-testing and MSAA names/roles. It does not prove every interactive behavior.
 
 Honor an explicit request to skip tests. Report skipped checks; do not present an earlier pass as proof of newly changed code. Documentation-only changes do not need application tests.
@@ -74,6 +78,7 @@ These checks move the pointer, manipulate focus, and capture screenshots. `--liv
 | Windows media acquisition and transport commands | Dedicated MTA worker in `media.c`; snapshot contract in `media.h` |
 | Core Audio output/mute/peak and system power | `platform.c` |
 | Headphone connections and driver-reported Bluetooth battery | Dedicated MTA worker and snapshot/delta contract in `headphones.c/.h` |
+| Opt-in Notification Center mirroring | `notifications.c/.h`; package identity + Windows permission required |
 | Defaults, normalization, INI persistence, shortcut parsing | `config.c/.h` |
 | Modeless native settings, draft/baseline, validation, preview | `settings.c/.h` |
 | Screen-reader object, roles, names, values, actions | `accessibility.c` |
@@ -117,6 +122,12 @@ Headphone discovery enumerates active render endpoints on its own MTA worker. Ma
 
 The `headphones` CTest target is headless and uses synthetic snapshots. The original `assets/earbuds.svg` is embedded as RCDATA 101 and loaded once into GDI+ paths; this small loader supports only the absolute M/L/C/Z commands used by our own asset, not arbitrary SVG input. Earbuds are lowest priority: media/timer keep the main pill and move earbuds to a separate circular side bubble sized by `media_extra_width`. Earbuds use the main compact pill only with no other activity; that idle width uses `idle_width + media_extra_width`. Connection previews use a pill radius and a numeric battery ring; unknown battery must not look like zero. Honor a user request not to execute any tests; compilation is not a runtime pass.
 
+### Notifications
+
+`UserNotificationListener` requires MSIX package identity, the `userNotificationListener` capability, and explicit Windows permission. Keep it off by default. Request access only from the settings button on the UI thread; startup/config apply may inspect status but must never trigger a permission prompt. The worker polls only after access is allowed, establishes its first result as a baseline, and posts heap `NotificationMessage` values to the UI. Drain them after stopping the worker. Source-only mode must not fetch title/body text. Never dismiss or alter source notifications.
+
+The portable executable cannot use this protected listener. The optional package manifest and package script produce an unsigned MSIX; users must sign it with their own trusted certificate before normal installation. Do not recommend disabling Windows security or bypassing signature enforcement.
+
 ### Configuration transactions
 
 `%LOCALAPPDATA%\DynamicWindows\settings.ini` is personal state. Legacy MacNotch settings are read only as a fallback; Apply writes to the new profile and does not delete the old file.
@@ -133,4 +144,4 @@ A version change spans **CMake**, `resources/dynamicwindows.rc`, `resources/dyna
 
 The release is unsigned; do not describe it as signed or recommend disabling Windows security. Retain GPL license/About notices and source availability.
 
-The app currently has no network requests, telemetry, microphone/camera capture, or Notification Center mirroring. The camera-style dot is decorative. Apple services, calls, and other apps' toasts are not implemented; do not imply those integrations exist or substitute simulated activity outside explicit demo mode.
+The app currently has no telemetry, microphone/camera capture, or background network requests. Notification Center mirroring is opt-in, package-gated, and permission-gated; it must remain off by default. The camera-style dot is decorative. Apple services and calls are not implemented; do not imply those integrations exist or substitute simulated activity outside explicit demo mode.

@@ -118,6 +118,9 @@ typedef struct {
     bool headphone_status;
     bool headphone_battery;
     int headphone_alert_ms;
+    bool notifications_enabled;
+    bool notification_content;
+    int notification_alert_ms;
     ShortcutBinding shortcuts[SHORTCUT_COUNT];
 } AppConfig;
 

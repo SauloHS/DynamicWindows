@@ -4,9 +4,16 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef enum { ISLAND_MEDIA, ISLAND_TIMER, ISLAND_SYSTEM } IslandView;
+typedef enum { ISLAND_MEDIA, ISLAND_TIMER, ISLAND_SYSTEM, ISLAND_NOTIFICATIONS } IslandView;
 typedef enum { ACTIVITY_NONE, ACTIVITY_MEDIA, ACTIVITY_TIMER } IslandActivity;
-typedef enum { ALERT_NONE, ALERT_VOLUME, ALERT_POWER, ALERT_HEADPHONES, ALERT_TIMER } IslandAlert;
+typedef enum {
+    ALERT_NONE,
+    ALERT_VOLUME,
+    ALERT_POWER,
+    ALERT_HEADPHONES,
+    ALERT_NOTIFICATION,
+    ALERT_TIMER
+} IslandAlert;
 
 typedef struct {
     uint64_t duration;

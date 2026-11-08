@@ -81,6 +81,16 @@ void app_summary(const App *app, wchar_t *text, size_t count) {
                  detail);
         return;
     }
+    if (app->island.alert == ALERT_NOTIFICATION && !app->island.expanded) {
+        const AppNotification *notification = &app->notification_alert;
+        if (app->config.notification_content)
+            swprintf(text, count, L"DynamicWindows. Notification from %ls. %ls. %ls.",
+                     notification->source, notification->title, notification->body);
+        else
+            swprintf(text, count, L"DynamicWindows. New notification from %ls.",
+                     notification->source);
+        return;
+    }
     if (app->island.expanded) {
         if (app->island.view == ISLAND_TIMER) {
             wchar_t clock[32];
@@ -90,6 +100,9 @@ void app_summary(const App *app, wchar_t *text, size_t count) {
                      : app->island.timer.paused  ? L"Paused"
                      : app->island.timer.running ? L"Running"
                                                  : L"Ready");
+        } else if (app->island.view == ISLAND_NOTIFICATIONS) {
+            swprintf(text, count, L"DynamicWindows. Notifications. %u captured. Expanded.",
+                     app->notification_count);
         } else if (app->island.view == ISLAND_SYSTEM) {
             swprintf(text, count,
                      L"DynamicWindows. System controls. %ls. Volume %d%%. %ls. Expanded.",
@@ -376,6 +389,8 @@ bool app_apply_config(App *app, const AppConfig *input, bool persist) {
     }
     app->hover_enabled = config.hover_expand;
     app->quiet_fullscreen = config.hide_fullscreen;
+    notifications_configure(&app->notification_service, app->window, config.notifications_enabled,
+                            config.notification_content);
     app->motion_allowed = !config.reduced_motion;
     motion_setting(app);
     app->island.media_available = app->media.available && config.show_media;
@@ -538,13 +553,17 @@ void app_action(App *app, Action action, double value) {
             app_close(app);
             return;
         }
-        app_open(app,
-                 app->island.alert == ALERT_HEADPHONES ||
-                         (app_primary(app) == ACTIVITY_NONE && app_headphones(app))
-                     ? ISLAND_SYSTEM
-                 : app_primary(app) == ACTIVITY_TIMER ? ISLAND_TIMER
-                                                      : ISLAND_MEDIA,
-                 true);
+        IslandView target = app->island.alert == ALERT_NOTIFICATION ? ISLAND_NOTIFICATIONS
+                            : app->island.alert == ALERT_HEADPHONES ||
+                                    (app_primary(app) == ACTIVITY_NONE && app_headphones(app))
+                                ? ISLAND_SYSTEM
+                            : app_primary(app) == ACTIVITY_TIMER ? ISLAND_TIMER
+                                                                 : ISLAND_MEDIA;
+        if (app->island.alert == ALERT_NOTIFICATION) {
+            app->island.alert = ALERT_NONE;
+            app->island.alert_deadline = 0;
+        }
+        app_open(app, target, true);
         return;
     case ACTION_SECONDARY:
         app_open(app, app_secondary(app) == ACTIVITY_TIMER ? ISLAND_TIMER : ISLAND_MEDIA, true);
@@ -558,12 +577,18 @@ void app_action(App *app, Action action, double value) {
     case ACTION_TAB_MEDIA:
     case ACTION_TAB_TIMER:
     case ACTION_TAB_SYSTEM:
+    case ACTION_TAB_NOTIFICATIONS:
         if (!app->island.expanded) {
-            app_open(app, (IslandView)(action - ACTION_TAB_MEDIA), true);
+            app_open(app,
+                     action == ACTION_TAB_NOTIFICATIONS ? ISLAND_NOTIFICATIONS
+                                                        : (IslandView)(action - ACTION_TAB_MEDIA),
+                     true);
             return;
         }
         app->hover_open = false;
-        island_open(&app->island, (IslandView)(action - ACTION_TAB_MEDIA));
+        island_open(&app->island, action == ACTION_TAB_NOTIFICATIONS
+                                      ? ISLAND_NOTIFICATIONS
+                                      : (IslandView)(action - ACTION_TAB_MEDIA));
         app->focus = -1;
         NotifyWinEvent(EVENT_OBJECT_REORDER, app->window, OBJID_CLIENT, CHILDID_SELF);
         break;
@@ -626,6 +651,14 @@ void app_action(App *app, Action action, double value) {
     case ACTION_SETTINGS:
         settings_show(app);
         return;
+    case ACTION_NOTIFICATION_PREVIOUS:
+        if (app->notification_count && app->notification_index + 1 < app->notification_count)
+            ++app->notification_index;
+        break;
+    case ACTION_NOTIFICATION_NEXT:
+        if (app->notification_index > 0)
+            --app->notification_index;
+        break;
     case ACTION_TRACK_INFO:
         return;
     case ACTION_NONE:
@@ -851,6 +884,36 @@ static void pointer_state(App *app, uint64_t now) {
         app_close(app);
 }
 
+static void notification_store(App *app, const AppNotification *notification) {
+    if (app->notification_count < NOTIFICATION_HISTORY)
+        ++app->notification_count;
+    for (unsigned i = app->notification_count - 1; i > 0; --i)
+        app->notifications[i] = app->notifications[i - 1];
+    app->notifications[0] = *notification;
+    app->notification_index = 0;
+}
+
+static void notification_receive(App *app, NotificationMessage *message) {
+    if (!message)
+        return;
+    app->notification_service.access = message->access;
+    app->notification_service.error = message->error;
+    if (message->has_notification) {
+        notification_store(app, &message->notification);
+        app->notification_alert = message->notification;
+        uint64_t now = GetTickCount64();
+        island_show_alert(&app->island, ALERT_NOTIFICATION, now);
+        if (app->island.alert == ALERT_NOTIFICATION) {
+            app->island.alert_deadline = now + (uint64_t)app->config.notification_alert_ms;
+            app->event_until = app->island.alert_deadline;
+            NotifyWinEvent(EVENT_SYSTEM_ALERT, app->window, OBJID_CLIENT, CHILDID_SELF);
+        }
+    }
+    free(message);
+    app_animate(app);
+    app_render(app);
+}
+
 static void headphones_receive(App *app, HeadphoneSnapshot *snapshot) {
     if (!snapshot)
         return;
@@ -932,6 +995,7 @@ static void frame(App *app) {
         app_event(app, false);
         tray_tooltip(app);
     }
+    notifications_tick(&app->notification_service);
     if (now - app->last_poll >= 50) {
         system_poll(app, now);
         bool fullscreen = app->quiet_fullscreen && !settings_is_preview(app) &&
@@ -1204,8 +1268,12 @@ static void shutdown_app(App *app) {
     }
     settings_destroy(app);
     media_stop(&app->media_service);
+    notifications_stop(&app->notification_service);
     headphones_stop(&app->headphone_service);
     MSG message;
+    while (PeekMessageW(&message, app->window, WM_DYNAMICWINDOWS_NOTIFICATION,
+                        WM_DYNAMICWINDOWS_NOTIFICATION, PM_REMOVE))
+        free((NotificationMessage *)message.lParam);
     while (PeekMessageW(&message, app->window, WM_DYNAMICWINDOWS_HEADPHONES,
                         WM_DYNAMICWINDOWS_HEADPHONES, PM_REMOVE))
         free((HeadphoneSnapshot *)message.lParam);
@@ -1330,6 +1398,9 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LP
         } else {
             app_action(app, (Action)wparam, (double)lparam / 10000);
         }
+        return 0;
+    case WM_DYNAMICWINDOWS_NOTIFICATION:
+        notification_receive(app, (NotificationMessage *)lparam);
         return 0;
     case WM_DYNAMICWINDOWS_HEADPHONES:
         headphones_receive(app, (HeadphoneSnapshot *)lparam);
@@ -1635,6 +1706,8 @@ static bool create_app(App *app, const Options *options) {
         return true;
     if (!headphones_start(&app->headphone_service, app->window))
         app->headphones = (HeadphoneSnapshot){.initialized = true, .error = E_FAIL};
+    notifications_configure(&app->notification_service, app->window,
+                            app->config.notifications_enabled, app->config.notification_content);
     if (options->demo) {
         app->media = (MediaSnapshot){.initialized = true,
                                      .available = true,

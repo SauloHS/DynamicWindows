@@ -5,6 +5,7 @@
 #include "headphones.h"
 #include "island.h"
 #include "media.h"
+#include "notifications.h"
 #include "platform.h"
 
 #include <commctrl.h>
@@ -57,7 +58,10 @@ typedef enum {
     ACTION_TIMER_DISMISS,
     ACTION_TRACK_INFO,
     ACTION_SEARCH,
-    ACTION_SETTINGS
+    ACTION_SETTINGS,
+    ACTION_TAB_NOTIFICATIONS,
+    ACTION_NOTIFICATION_PREVIOUS,
+    ACTION_NOTIFICATION_NEXT
 } Action;
 
 typedef struct {
@@ -170,6 +174,11 @@ typedef struct App {
     HeadphoneService headphone_service;
     HeadphoneSnapshot headphones;
     HeadphoneEvent headphone_event;
+    NotificationService notification_service;
+    AppNotification notifications[NOTIFICATION_HISTORY];
+    unsigned notification_count;
+    unsigned notification_index;
+    AppNotification notification_alert;
     MediaService media_service;
     MediaSnapshot media;
     Renderer renderer;

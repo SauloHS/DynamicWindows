@@ -30,7 +30,9 @@ static void test_defaults(void) {
     CHECK(config.headphone_alerts);
     CHECK(config.headphone_status);
     CHECK(config.headphone_battery);
-    CHECK(config.headphone_alert_ms == 4000);
+    CHECK(config.notification_content);
+    CHECK(!config.notifications_enabled);
+    CHECK(config.notification_alert_ms == 5000);
     CHECK(wcscmp(config.idle_font, L"Segoe UI") == 0);
     double width;
     double height;
@@ -57,6 +59,7 @@ static void test_limits(void) {
     config.damping = 0;
     config.frame_rate = 1000;
     config.timer_seconds = 100000;
+    config.notification_alert_ms = 99999;
     config.colors[TINT_ACCENT] = 0xffffffff;
     config_normalize(&config);
     CHECK(config.idle == IDLE_HIDDEN);
@@ -74,6 +77,7 @@ static void test_limits(void) {
     CHECK(config.damping == 50);
     CHECK(config.frame_rate == 144);
     CHECK(config.timer_seconds == 86400);
+    CHECK(config.notification_alert_ms == 15000);
     CHECK(config.colors[TINT_ACCENT] == 0xffffff);
 }
 
@@ -131,6 +135,9 @@ static void test_persistence(void) {
     saved.headphone_status = false;
     saved.headphone_battery = false;
     saved.headphone_alert_ms = 7500;
+    saved.notification_content = false;
+    saved.notifications_enabled = true;
+    saved.notification_alert_ms = 6400;
     saved.colors[TINT_ACCENT] = 0x123abc;
     CHECK(config_save(&saved, path));
     AppConfig loaded;
@@ -142,6 +149,9 @@ static void test_persistence(void) {
     CHECK(loaded.idle_width == saved.idle_width);
     CHECK(loaded.compact_height == saved.compact_height);
     CHECK(loaded.response_ms == saved.response_ms);
+    CHECK(!loaded.notification_content);
+    CHECK(loaded.notifications_enabled);
+    CHECK(loaded.notification_alert_ms == 6400);
     CHECK(loaded.colors[TINT_ACCENT] == saved.colors[TINT_ACCENT]);
     CHECK(!loaded.settings_on_start);
     CHECK(!loaded.hide_fullscreen);

@@ -1,6 +1,7 @@
 build/
 build-*/
 dist/
+*.msix
 __pycache__/
 *.pyc
 *.o

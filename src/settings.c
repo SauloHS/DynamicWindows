@@ -11,7 +11,7 @@
 #include <wctype.h>
 
 #define SETTINGS_PAGE_CLASS L"DynamicWindowsSettingsPage"
-#define SETTINGS_PAGE_COUNT 6
+#define SETTINGS_PAGE_COUNT 7
 #define SETTINGS_MARGIN 16
 #define COUNT_OF(items) (sizeof(items) / sizeof((items)[0]))
 
@@ -25,7 +25,9 @@ typedef enum {
     FIELD_ANCHOR,
     FIELD_MONITOR,
     FIELD_COLOR,
-    FIELD_SHORTCUT
+    FIELD_SHORTCUT,
+    FIELD_BUTTON,
+    FIELD_STATUS
 } FieldKind;
 
 typedef enum {
@@ -34,7 +36,8 @@ typedef enum {
     PAGE_APPEARANCE,
     PAGE_MOTION,
     PAGE_BEHAVIOR,
-    PAGE_SHORTCUTS
+    PAGE_SHORTCUTS,
+    PAGE_NOTIFICATIONS
 } SettingsPage;
 
 typedef struct {
@@ -77,6 +80,9 @@ typedef struct {
      label,                                                                                        \
      help,                                                                                         \
      section}
+#define BUTTON(id, label, help, section)                                                           \
+    {id, PAGE_NOTIFICATIONS, FIELD_BUTTON, 0, 0, 0, label, help, section}
+#define STATUS(id, label, help) {id, PAGE_NOTIFICATIONS, FIELD_STATUS, 0, 0, 0, label, help, NULL}
 
 static const SettingsField fields[] = {
     CHOICE(ID_SETTINGS_IDLE, PAGE_IDLE, FIELD_IDLE, idle, IDLE_HIDDEN, L"&Idle content",
@@ -265,6 +271,19 @@ static const SettingsField fields[] = {
     SHORTCUT(ID_SETTINGS_SHORTCUT_END, SHORTCUT_END, L"Slider end (local)",
              L"Only with island focus. Sets volume or playback to the end; type End or None.",
              NULL),
+
+    BOOLEAN(ID_SETTINGS_NOTIFICATIONS_ENABLED, PAGE_NOTIFICATIONS, notifications_enabled,
+            L"Show app notifications", L"Requires explicit Windows permission and an MSIX install.",
+            L"Permission and privacy"),
+    BOOLEAN(ID_SETTINGS_NOTIFICATION_CONTENT, PAGE_NOTIFICATIONS, notification_content,
+            L"Show notification content",
+            L"When off, DynamicWindows shows only the source application.", NULL),
+    INTEGER(ID_SETTINGS_NOTIFICATION_ALERT_MS, PAGE_NOTIFICATIONS, notification_alert_ms, 500,
+            15000, L"Notification preview duration", L"ms.", L"Island behavior"),
+    BUTTON(ID_SETTINGS_NOTIFICATION_ACCESS, L"Request Windows access",
+           L"Windows displays its own permission prompt. DynamicWindows cannot bypass it.",
+           L"Windows access"),
+    STATUS(ID_SETTINGS_NOTIFICATION_STATUS, L"Current access", L"Current listener state."),
 };
 
 #undef INTEGER
@@ -274,9 +293,11 @@ static const SettingsField fields[] = {
 #undef CHOICE
 #undef COLOR
 #undef SHORTCUT
+#undef BUTTON
+#undef STATUS
 
-static const wchar_t *const page_names[] = {L"Idle",   L"Layout",   L"Appearance",
-                                            L"Motion", L"Behavior", L"Shortcuts"};
+static const wchar_t *const page_names[] = {L"Idle",     L"Layout",    L"Appearance",   L"Motion",
+                                            L"Behavior", L"Shortcuts", L"Notifications"};
 static const wchar_t *const idle_choices[] = {
     L"Clock", L"Date", L"Clock + date", L"Custom text", L"Battery", L"Volume", L"Blank", L"Hidden"};
 static const wchar_t *const anchor_choices[] = {L"Top left",    L"Top center",    L"Top right",
@@ -284,7 +305,7 @@ static const wchar_t *const anchor_choices[] = {L"Top left",    L"Top center",  
                                                 L"Bottom left", L"Bottom center", L"Bottom right"};
 
 _Static_assert(COUNT_OF(page_names) == SETTINGS_PAGE_COUNT, "Settings tab count must match");
-_Static_assert(ID_SETTINGS_PAGE_SHORTCUTS - ID_SETTINGS_PAGE_IDLE + 1 == SETTINGS_PAGE_COUNT,
+_Static_assert(ID_SETTINGS_PAGE_NOTIFICATIONS - ID_SETTINGS_PAGE_IDLE + 1 == SETTINGS_PAGE_COUNT,
                "Settings page IDs must match tabs");
 _Static_assert(ID_SETTINGS_SHORTCUT_END - ID_SETTINGS_SHORTCUT_ISLAND + 1 == SHORTCUT_COUNT,
                "Every shortcut needs a settings control");
@@ -501,7 +522,7 @@ static bool create_field(SettingsState *state, size_t index) {
             return false;
         SendMessageW(control->section, WM_SETFONT, (WPARAM)state->section_font, FALSE);
     }
-    if (field->kind != FIELD_BOOLEAN) {
+    if (field->kind != FIELD_BOOLEAN && field->kind != FIELD_BUTTON) {
         control->label = create_control(state, parent, L"STATIC", field->label, SS_LEFT, 0,
                                         field->id + ID_SETTINGS_LABEL_OFFSET);
         if (!control->label)
@@ -511,6 +532,16 @@ static bool create_field(SettingsState *state, size_t index) {
     const wchar_t *class_name = L"EDIT";
     DWORD extended = WS_EX_CLIENTEDGE;
     switch (field->kind) {
+    case FIELD_STATUS:
+        class_name = L"STATIC";
+        style = SS_LEFT | SS_NOPREFIX;
+        extended = 0;
+        break;
+    case FIELD_BUTTON:
+        class_name = L"BUTTON";
+        style |= BS_PUSHBUTTON | BS_MULTILINE;
+        extended = 0;
+        break;
     case FIELD_BOOLEAN:
         class_name = L"BUTTON";
         style |= BS_AUTOCHECKBOX | BS_MULTILINE;
@@ -532,12 +563,17 @@ static bool create_field(SettingsState *state, size_t index) {
         style |= ES_AUTOHSCROLL;
         break;
     }
-    control->control =
-        create_control(state, parent, class_name, field->kind == FIELD_BOOLEAN ? field->label : L"",
-                       style, extended, field->id);
+    control->control = create_control(
+        state, parent, class_name,
+        field->kind == FIELD_BOOLEAN || field->kind == FIELD_BUTTON ? field->label : L"", style,
+        extended, field->id);
     if (!control->control)
         return false;
-    if (field->kind == FIELD_FONT) {
+    if (field->kind == FIELD_STATUS) {
+        wchar_t status[256];
+        notifications_status(&state->app->notification_service, status, COUNT_OF(status));
+        SetWindowTextW(control->control, status);
+    } else if (field->kind == FIELD_FONT) {
         static const wchar_t *const fonts[] = {L"Segoe UI", L"Arial",  L"Calibri",
                                                L"Consolas", L"Tahoma", L"Verdana"};
         for (size_t i = 0; i < COUNT_OF(fonts); ++i)
@@ -569,8 +605,8 @@ static bool create_field(SettingsState *state, size_t index) {
         swprintf(label, COUNT_OF(label), L"Choose %ls", field->label);
         describe_control(state, control->picker, label, L"Open the native Windows color picker.");
     }
-    control->help = create_control(state, parent, L"STATIC", field->help, SS_LEFT | SS_NOPREFIX, 0,
-                                   field->id + ID_SETTINGS_HELP_OFFSET);
+    control->help = create_control(state, parent, L"STATIC", field->help ? field->help : L"",
+                                   SS_LEFT | SS_NOPREFIX, 0, field->id + ID_SETTINGS_HELP_OFFSET);
     return control->help != NULL;
 }
 
@@ -586,9 +622,9 @@ static bool create_form(SettingsState *state) {
     if (!state->title || !state->hint || !state->tabs)
         return false;
     SendMessageW(state->title, WM_SETFONT, (WPARAM)state->title_font, FALSE);
-    describe_control(
-        state, state->tabs, L"Settings categories",
-        L"Idle, Layout, Appearance, Motion, Behavior, Shortcuts. Control+Tab switches categories.");
+    describe_control(state, state->tabs, L"Settings categories",
+                     L"Idle, Layout, Appearance, Motion, Behavior, Shortcuts, and Notifications. "
+                     L"Control+Tab switches categories.");
     for (int i = 0; i < SETTINGS_PAGE_COUNT; ++i) {
         TCITEMW item = {.mask = TCIF_TEXT, .pszText = (wchar_t *)page_names[i]};
         if (TabCtrl_InsertItem(state->tabs, i, &item) < 0)
@@ -672,6 +708,14 @@ static void fill_form(SettingsState *state, const AppConfig *config) {
         const unsigned char *value = (const unsigned char *)config + field->offset;
         wchar_t text[160];
         switch (field->kind) {
+        case FIELD_STATUS: {
+            wchar_t status[256];
+            notifications_status(&state->app->notification_service, status, COUNT_OF(status));
+            SetWindowTextW(control, status);
+            break;
+        }
+        case FIELD_BUTTON:
+            break;
         case FIELD_BOOLEAN:
             SendMessageW(control, BM_SETCHECK, *(const bool *)value ? BST_CHECKED : BST_UNCHECKED,
                          0);
@@ -770,6 +814,9 @@ static bool read_field(SettingsState *state, size_t index, AppConfig *config) {
     unsigned char *destination = (unsigned char *)config + field->offset;
     wchar_t text[160];
     switch (field->kind) {
+    case FIELD_BUTTON:
+    case FIELD_STATUS:
+        return true;
     case FIELD_BOOLEAN:
         *(bool *)destination = SendMessageW(control, BM_GETCHECK, 0, 0) == BST_CHECKED;
         return true;
@@ -999,12 +1046,15 @@ static int page_content_height(SettingsState *state, int page, int width) {
         FieldControl *control = &state->controls[i];
         if (fields[i].section)
             height += 40;
-        int help_width = fields[i].kind == FIELD_BOOLEAN ? maximum(1, available - 24) : input_width;
+        bool compact_field = fields[i].kind == FIELD_BOOLEAN || fields[i].kind == FIELD_BUTTON ||
+                             fields[i].kind == FIELD_STATUS;
+        int help_width = compact_field ? maximum(1, available - 24) : input_width;
         control->help_height = wrapped_height(state, dc, control->help, help_width, 18);
-        if (fields[i].kind == FIELD_BOOLEAN) {
-            int check_height =
-                wrapped_height(state, dc, control->control, maximum(1, available - 24), 24);
-            control->height = check_height + 4 + control->help_height + 12;
+        if (compact_field) {
+            int field_height = fields[i].kind == FIELD_BUTTON   ? 34
+                               : fields[i].kind == FIELD_STATUS ? 44
+                                                                : 24;
+            control->height = field_height + 4 + control->help_height + 12;
         } else {
             control->height = (narrow ? 24 : 0) + 32 + control->help_height + 12;
         }
@@ -1071,11 +1121,18 @@ static void layout_page(SettingsState *state, int page) {
         int y = content_y - offset;
         control->top = pixels(state, content_y);
         control->bottom = pixels(state, content_y + control->height);
-        if (field->kind == FIELD_BOOLEAN) {
-            int check_height = control->height - control->help_height - 16;
-            move_control(state, control->control, left, y, available, check_height);
-            move_control(state, control->help, left + 24, y + check_height + 4,
-                         maximum(1, available - 24), control->help_height);
+        if (field->kind == FIELD_BOOLEAN || field->kind == FIELD_BUTTON ||
+            field->kind == FIELD_STATUS) {
+            int check_height = field->kind == FIELD_BOOLEAN
+                                   ? control->height - control->help_height - 16
+                               : field->kind == FIELD_BUTTON ? 34
+                                                             : 44;
+            int control_width = field->kind == FIELD_BUTTON ? minimum(240, available) : available;
+            move_control(state, control->control, left, y, control_width, check_height);
+            move_control(state, control->help, left + (field->kind == FIELD_BOOLEAN ? 24 : 0),
+                         y + check_height + 4,
+                         maximum(1, available - (field->kind == FIELD_BOOLEAN ? 24 : 0)),
+                         control->help_height);
             content_y += control->height;
             continue;
         }
@@ -1451,6 +1508,20 @@ static void handle_command(SettingsState *state, WPARAM wparam, LPARAM lparam) {
         ensure_visible(state, control);
     if (state->loading)
         return;
+    if (id == ID_SETTINGS_NOTIFICATION_ACCESS && notification == BN_CLICKED) {
+        if (notifications_request(&state->app->notification_service, state->app->window))
+            status_text(state, L"Windows notification permission requested.", false);
+        else
+            status_text(state, L"Notification access requires the packaged MSIX build on this PC.",
+                        true);
+        size_t status = field_index(ID_SETTINGS_NOTIFICATION_STATUS);
+        if (status < COUNT_OF(fields)) {
+            wchar_t text[256];
+            notifications_status(&state->app->notification_service, text, COUNT_OF(text));
+            SetWindowTextW(state->controls[status].control, text);
+        }
+        return;
+    }
     if (id == ID_SETTINGS_APPLY || id == IDOK) {
         if (notification == BN_CLICKED)
             apply_draft(state);
@@ -1502,7 +1573,8 @@ static void handle_command(SettingsState *state, WPARAM wparam, LPARAM lparam) {
             state->loading = false;
         }
     }
-    bool changed = kind == FIELD_BOOLEAN ? notification == BN_CLICKED
+    bool changed = kind == FIELD_BUTTON || kind == FIELD_STATUS ? false
+                   : kind == FIELD_BOOLEAN                      ? notification == BN_CLICKED
                    : kind == FIELD_IDLE || kind == FIELD_ANCHOR || kind == FIELD_MONITOR
                        ? notification == CBN_SELCHANGE
                    : kind == FIELD_FONT

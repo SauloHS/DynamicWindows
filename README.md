@@ -34,7 +34,7 @@ DynamicWindows brings a Dynamic Island-inspired activity surface to **Windows 10
 - **System controls without the detour.** Adjust volume and mute, see power changes, and open the actual Windows Search panel.
 - **Headphones, without guessing.** Connection and disconnection alerts for wired/USB headphones and Bluetooth audio, plus battery levels when Windows reports them.
 - **Motion with continuity.** Interruptible springs, adjustable damping, and slide-and-fade hide/show transitions. Windows' reduced-motion setting is respected.
-- **Yours to configure.** Six native settings tabs, live preview, saved preferences, monitor placement, colors, and customizable app shortcuts.
+- **Yours to configure.** Seven native settings tabs, live preview, saved preferences, monitor placement, colors, notifications, and customizable app shortcuts.
 
 > **Early release:** v0.1.0 is a usable first version, not a finished operating-system component. Media support depends on what your player exposes to Windows. Bug reports with reproduction steps are welcome.
 
@@ -101,6 +101,12 @@ Detection follows active Windows audio endpoints and matches Bluetooth device pr
 
 Use **Behavior → Headphones and Bluetooth** to control alerts, persistent compact status, battery visibility, and alert duration. The System panel keeps connected device information available. All device discovery runs on a worker; no pairing, drivers, microphone capture, or network access is needed.
 
+### App notifications
+
+Notification mirroring is **off by default**. It requires the optional MSIX install because Windows gates `UserNotificationListener` behind package identity and the `userNotificationListener` capability. Open **Notifications → Request Windows access**; Windows owns the permission prompt and can deny or revoke access.
+
+Allowed toast notifications briefly appear on the island and remain available in the expanded **Alerts** view. Source-only mode hides title/body content. DynamicWindows only reads notifications when enabled; it does not dismiss or modify the originals. The portable executable continues to work, but cannot access this protected API.
+
 ### Timers and system activity
 
 Choose a 1-, 5-, 15-, or 25-minute preset, or set a different initial duration in settings. Completion produces an alert and optional sound. Timers use a monotonic deadline, including after sleep, but **do not survive quitting the app**.
@@ -123,8 +129,9 @@ Open settings with **Ctrl + Alt + C**, **right-click → Customize DynamicWindow
 | **Motion** | Response time, spring damping, animation frame-rate target, and reduced motion. |
 | **Behavior** | Activity visibility, artwork background, waveform, media details, preview duration, volume/power alerts, hover delays, timer sound, and full-screen hiding. |
 | **Shortcuts** | Global and local key bindings, with duplicate validation and optional disabling. |
+| **Notifications** | Explicit Windows permission, source-only privacy mode, preview duration, and current access status. |
 
-<p align="center"><img src="assets/settings.png" alt="DynamicWindows native settings window with six customization tabs" width="760" /></p>
+<p align="center"><img src="assets/settings.png" alt="DynamicWindows native settings window" width="760" /></p>
 
 **Live preview** changes the island without saving. **Apply** saves a new baseline. **Cancel** restores the last applied configuration. **Reset defaults** resets the draft, not your saved file.
 
@@ -146,11 +153,21 @@ Use a separate profile when needed:
 .\DynamicWindows.exe --config C:\path\my-island.ini --settings
 ```
 
+### Optional notification-capable MSIX
+
+Build the app, then create an unsigned MSIX package:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File packaging\build-msix.ps1
+```
+
+MSIX installation requires a trusted code-signing certificate. Pass its exact subject with `-Publisher`, then sign the generated package with `signtool.exe`. Do not install an unsigned package or disable signature enforcement. The portable executable remains the simplest build when notification access is not needed.
+
 ## Privacy, honestly
 
 - No app network requests, telemetry, accounts, or cloud configuration.
 - No microphone capture, audio recording, camera access, or screen recording.
-- No notification-database scraping or background reading of other apps' messages.
+- No notification access unless explicitly enabled and granted by Windows.
 - Media metadata comes from **Windows GSMTC**. The waveform uses an audio-output peak meter.
 - An outside-click listener is active for manually opened controls; it closes the island without swallowing the click.
 - The optional development GUI checks take screenshots. Those files are local test output, not part of the release.
@@ -161,14 +178,14 @@ The camera-style dot is **decorative**. It is not a camera privacy indicator.
 
 DynamicWindows is an independent Windows app—not Apple software, a Windows shell replacement, or a complete iOS/macOS port.
 
-- It does **not** mirror Discord, Teams, email, or other Windows Notification Center toasts.
+- Notification Center mirroring requires the optional MSIX package and explicit Windows permission; the portable executable cannot request this protected capability.
 - It does not integrate Siri, AirDrop, phone calls, Face ID, delivery tracking, or third-party Live Activities.
 - It does not reserve desktop space. The overlay can overlap app toolbars; move it or hide it when needed.
 - It cannot appear on Windows' secure desktop or lock screen.
 - It does not enable automatic startup or update itself.
 - Windows on ARM is not a native build target for this release.
 
-Reading other apps' toasts would require a separate Windows notification-listener integration with explicit user permission. It is not silently enabled here.
+Notification access is never silently enabled. Windows owns the permission prompt, and source-only mode can keep toast text out of the island.
 
 ## Build from source
 
@@ -195,11 +212,12 @@ cmake --build build --target lint
 ```
 
 - **Core tests:** countdown deadlines, pause/resume, priority, geometry, and frame-rate-independent springs.
-- **Configuration tests:** defaults, Unicode persistence, limits, placement, and malformed input.
+- **Configuration tests:** defaults, Unicode persistence, limits, placement, malformed input, and notification privacy defaults.
+- **Notification tests:** duplicate suppression, baseline handling, text sanitation, bounded history, and permission-state labels. They do not request permission or read real notifications.
 - **Headphone tests:** connection/disconnection deltas, Bluetooth identity, validated battery values, unavailable battery text, and bounded events. No mouse, audio changes, or hardware required.
 - **Native smoke:** renders representative states and checks alpha hit-testing and accessibility names/roles.
 
-Optional GUI checks require Python 3 and an interactive Windows desktop. They move the pointer, foreground the test app, and save local screenshots. Quit any existing instance first, and do not share screenshots containing private desktop content.
+Optional GUI checks require Python 3 and an interactive Windows desktop. They move the pointer, foreground the test app, and save local screenshots. The settings check also verifies the Notifications page without pressing its permission button. Quit any existing instance first, and do not share screenshots containing private desktop content.
 
 ```powershell
 python -I tests/gui_check.py build/DynamicWindows.exe build/smoke --settings

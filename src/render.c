@@ -21,7 +21,8 @@ typedef enum {
     GLYPH_POWER,
     GLYPH_SETTINGS,
     GLYPH_CHECK,
-    GLYPH_HEADPHONES
+    GLYPH_HEADPHONES,
+    GLYPH_BELL
 } Glyph;
 
 static ARGB ink(const Renderer *renderer, ARGB color) {
@@ -343,6 +344,23 @@ static void glyph(Renderer *renderer, Glyph symbol, double x, double y, double s
         polygon(renderer, points, 6, color);
         return;
     }
+    if (symbol == GLYPH_BELL) {
+        arc(renderer,
+            (RectF){(REAL)(left + 5 * unit), (REAL)(top + 3 * unit), (REAL)(14 * unit),
+                    (REAL)(16 * unit)},
+            180, 180, color, stroke);
+        line(renderer, left + 5 * unit, top + 11 * unit, left + 4 * unit, top + 19 * unit, color,
+             stroke);
+        line(renderer, left + 19 * unit, top + 11 * unit, left + 20 * unit, top + 19 * unit, color,
+             stroke);
+        line(renderer, left + 4 * unit, top + 19 * unit, left + 20 * unit, top + 19 * unit, color,
+             stroke);
+        arc(renderer,
+            (RectF){(REAL)(left + 10 * unit), (REAL)(top + 18 * unit), (REAL)(4 * unit),
+                    (REAL)(4 * unit)},
+            0, 180, color, stroke);
+        return;
+    }
     if (symbol == GLYPH_HEADPHONES) {
         arc(renderer,
             (RectF){(REAL)(left + 3 * unit), (REAL)(top + 3 * unit), (REAL)(18 * unit),
@@ -621,6 +639,17 @@ static void compact(App *app, bool add_hits) {
              COLOR_SECONDARY, StringAlignmentNear);
         return;
     }
+    if (app->island.alert == ALERT_NOTIFICATION) {
+        const AppNotification *notification = &app->notification_alert;
+        glyph(renderer, GLYPH_BELL, body.X + 31, middle, 25, COLOR_ACCENT);
+        text(renderer, notification->source, (RectF){body.X + 58, body.Y + 9, body.Width - 80, 21},
+             FONT_SMALL, COLOR_SECONDARY, StringAlignmentNear);
+        const wchar_t *title =
+            app->config.notification_content ? notification->title : L"New notification";
+        text(renderer, title, (RectF){body.X + 58, body.Y + 31, body.Width - 80, 28}, FONT_LABEL,
+             COLOR_TEXT, StringAlignmentNear);
+        return;
+    }
     if (app->island.alert == ALERT_HEADPHONES) {
         const HeadphoneEvent *event = &app->headphone_event;
         double size = fmin(42, body.Height - 24);
@@ -708,13 +737,15 @@ static void compact(App *app, bool add_hits) {
 static void header(App *app, bool add_hits) {
     Renderer *renderer = &app->renderer;
     RectF body = renderer->body;
-    static const Action actions[] = {ACTION_TAB_MEDIA, ACTION_TAB_TIMER, ACTION_TAB_SYSTEM};
-    static const wchar_t *labels[] = {L"Now Playing", L"Timer", L"System"};
-    static const REAL widths[] = {89, 51, 57};
+    static const Action actions[] = {ACTION_TAB_MEDIA, ACTION_TAB_TIMER, ACTION_TAB_SYSTEM,
+                                     ACTION_TAB_NOTIFICATIONS};
+    static const wchar_t *labels[] = {L"Playing", L"Timer", L"System", L"Alerts"};
+    static const REAL widths[] = {63, 51, 57, 51};
     REAL x = body.X + 12;
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         RectF rect = {x, body.Y + 11, widths[i], 29};
-        bool selected = (int)app->island.view == i;
+        bool selected = (i < 3 && (int)app->island.view == i) ||
+                        (i == 3 && app->island.view == ISLAND_NOTIFICATIONS);
         if (add_hits)
             hit_add(app, rect, actions[i], true, labels[i]);
         if (selected || app->hover == actions[i])
@@ -926,6 +957,45 @@ static void system_panel(App *app, bool add_hits) {
     text(renderer, *app->notice ? app->notice : L"Ctrl + Alt + D opens the island",
          (RectF){body.X + 20, body.Y + 240, body.Width - 40, 20}, FONT_SMALL, COLOR_SECONDARY,
          StringAlignmentCenter);
+}
+
+static void notification_panel(App *app, bool add_hits) {
+    Renderer *renderer = &app->renderer;
+    RectF body = renderer->body;
+    if (!app->notification_count) {
+        glyph(renderer, GLYPH_BELL, body.X + body.Width / 2, body.Y + 103, 34, COLOR_ACCENT);
+        text(renderer, L"No captured notifications",
+             (RectF){body.X + 24, body.Y + 135, body.Width - 48, 30}, FONT_TITLE, COLOR_TEXT,
+             StringAlignmentCenter);
+        wchar_t status[256];
+        notifications_status(&app->notification_service, status, 256);
+        text(renderer, status, (RectF){body.X + 28, body.Y + 169, body.Width - 56, 42}, FONT_BODY,
+             COLOR_SECONDARY, StringAlignmentCenter);
+        return;
+    }
+    const AppNotification *notification = &app->notifications[app->notification_index];
+    glyph(renderer, GLYPH_BELL, body.X + 41, body.Y + 91, 28, COLOR_ACCENT);
+    text(renderer, notification->source, (RectF){body.X + 66, body.Y + 67, body.Width - 90, 24},
+         FONT_LABEL, COLOR_SECONDARY, StringAlignmentNear);
+    const wchar_t *title =
+        app->config.notification_content ? notification->title : L"Notification content hidden";
+    text(renderer, title, (RectF){body.X + 24, body.Y + 104, body.Width - 48, 31}, FONT_TITLE,
+         COLOR_TEXT, StringAlignmentNear);
+    const wchar_t *body_text = app->config.notification_content
+                                   ? notification->body
+                                   : L"Enable content in Settings to read it.";
+    text(renderer, body_text, (RectF){body.X + 24, body.Y + 139, body.Width - 48, 56}, FONT_BODY,
+         COLOR_SECONDARY, StringAlignmentNear);
+    wchar_t position[40];
+    swprintf(position, 40, L"%u of %u", app->notification_index + 1, app->notification_count);
+    text(renderer, position, (RectF){body.X + body.Width / 2 - 45, body.Y + 215, 90, 28},
+         FONT_SMALL, COLOR_SECONDARY, StringAlignmentCenter);
+    button(app, (RectF){body.X + body.Width / 2 - 90, body.Y + 211, 32, 32},
+           ACTION_NOTIFICATION_PREVIOUS, L"Older notification", NULL, GLYPH_PREVIOUS, true,
+           app->notification_index + 1 < app->notification_count, false, add_hits);
+    button(app, (RectF){body.X + body.Width / 2 + 58, body.Y + 211, 32, 32},
+           ACTION_NOTIFICATION_NEXT, L"Newer notification", NULL, GLYPH_NEXT, true,
+           app->notification_index > 0, false, add_hits);
 }
 
 static void release_surface(Renderer *renderer) {
@@ -1188,6 +1258,8 @@ bool renderer_draw(App *app) {
             timer_panel(app, add_hits);
         else if (app->island.view == ISLAND_SYSTEM)
             system_panel(app, add_hits);
+        else if (app->island.view == ISLAND_NOTIFICATIONS)
+            notification_panel(app, add_hits);
         else
             media_panel(app, add_hits);
         GdipRestoreGraphics(renderer->graphics, state);

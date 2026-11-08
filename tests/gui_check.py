@@ -382,6 +382,13 @@ def check_settings(executable, output):
             capture(settings, output / "settings-motion.png")
             settings_tab(settings, 4)
             capture(settings, output / "settings-behavior.png")
+            settings_tab(settings, 6)
+            assert settings_control(settings, 1900), "Notifications enabled control missing"
+            assert settings_control(settings, 1901), "Notification content control missing"
+            assert settings_control(settings, 1903), "Notification permission control missing"
+            assert settings_control(settings, 1904), "Notification status control missing"
+            assert "MSIX" in title(settings_control(settings, 1904))
+            capture(settings, output / "settings-notifications.png")
             user32.SendMessageW(settings_control(settings, 1001), 0x00f5, 0, 0)
             wait_until(config.exists)
             content = config.read_text(encoding="utf-16")
