@@ -33,6 +33,15 @@ static void test_defaults(void) {
     CHECK(config.notification_content);
     CHECK(!config.notifications_enabled);
     CHECK(config.notification_alert_ms == 5000);
+    CHECK(!config.crab_enabled);
+    CHECK(config.crab_speak);
+    CHECK(wcscmp(config.crab_name, L"Crab") == 0);
+    CHECK(wcscmp(config.crab_model, L"claude-opus-5-5") == 0);
+    CHECK(config_shortcuts_valid(&config));
+    config.crab_shortcut = config.shortcuts[SHORTCUT_SEARCH];
+    CHECK(!config_shortcuts_valid(&config));
+    config.crab_shortcut = (ShortcutBinding){VK_SPACE, MOD_CONTROL | MOD_ALT};
+
     CHECK(wcscmp(config.idle_font, L"Segoe UI") == 0);
     double width;
     double height;
@@ -140,6 +149,11 @@ static void test_persistence(void) {
     saved.notification_content = false;
     saved.notifications_enabled = true;
     saved.notification_alert_ms = 6400;
+    wcscpy(saved.crab_name, L"Siri");
+    wcscpy(saved.crab_model, L"claude-opus-5-5");
+    saved.crab_enabled = true;
+    saved.crab_speak = false;
+    saved.crab_shortcut = (ShortcutBinding){'K', MOD_CONTROL | MOD_ALT};
     saved.colors[TINT_ACCENT] = 0x123abc;
     CHECK(config_save(&saved, path));
     AppConfig loaded;
@@ -154,6 +168,12 @@ static void test_persistence(void) {
     CHECK(!loaded.notification_content);
     CHECK(loaded.notifications_enabled);
     CHECK(loaded.notification_alert_ms == 6400);
+    CHECK(loaded.crab_enabled);
+    CHECK(!loaded.crab_speak);
+    CHECK(wcscmp(loaded.crab_name, L"Siri") == 0);
+    CHECK(wcscmp(loaded.crab_model, L"claude-opus-5-5") == 0);
+    CHECK(loaded.crab_shortcut.key == 'K');
+    CHECK(loaded.crab_shortcut.modifiers == (MOD_CONTROL | MOD_ALT));
     CHECK(loaded.colors[TINT_ACCENT] == saved.colors[TINT_ACCENT]);
     CHECK(!loaded.settings_on_start);
     CHECK(!loaded.hide_fullscreen);

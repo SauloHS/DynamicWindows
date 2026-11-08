@@ -389,6 +389,12 @@ def check_settings(executable, output):
             assert settings_control(settings, 1904), "Notification status control missing"
             assert "MSIX" in title(settings_control(settings, 1904))
             capture(settings, output / "settings-notifications.png")
+            settings_tab(settings, 7)
+            assert settings_control(settings, 1950), "Crab enabled control missing"
+            assert settings_control(settings, 1952), "Crab wake-name control missing"
+            assert settings_control(settings, 1954), "Crab API-key control missing"
+            assert settings_control(settings, 1956), "Crab status control missing"
+            capture(settings, output / "settings-crab.png")
             user32.SendMessageW(settings_control(settings, 1001), 0x00f5, 0, 0)
             wait_until(config.exists)
             content = config.read_text(encoding="utf-16")

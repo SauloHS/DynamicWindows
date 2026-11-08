@@ -72,7 +72,9 @@ void config_defaults(AppConfig *config) {
                           .headphone_battery = true,
                           .headphone_alert_ms = 4000,
                           .notification_content = true,
-                          .notification_alert_ms = 5000};
+                          .notification_alert_ms = 5000,
+                          .crab_speak = true};
+    config->crab_shortcut = (ShortcutBinding){VK_SPACE, MOD_CONTROL | MOD_ALT};
     config->shortcuts[SHORTCUT_ISLAND] = (ShortcutBinding){'D', MOD_CONTROL | MOD_ALT};
     config->shortcuts[SHORTCUT_TIMER] = (ShortcutBinding){'T', MOD_CONTROL | MOD_ALT};
     config->shortcuts[SHORTCUT_HIDE] = (ShortcutBinding){'H', MOD_CONTROL | MOD_ALT};
@@ -91,6 +93,20 @@ void config_defaults(AppConfig *config) {
     config->shortcuts[SHORTCUT_END] = (ShortcutBinding){VK_END, 0};
     wcscpy(config->idle_text, L"DynamicWindows");
     wcscpy(config->idle_font, L"Segoe UI");
+    wcscpy(config->crab_name, L"Crab");
+    wcscpy(config->crab_model, L"claude-opus-5-5");
+}
+
+static void trim_text(wchar_t *text) {
+    wchar_t *start = text;
+    while (iswspace(*start))
+        ++start;
+    size_t length = wcslen(start);
+    while (length && iswspace(start[length - 1]))
+        --length;
+    if (start != text)
+        memmove(text, start, length * sizeof(wchar_t));
+    text[length] = L'\0';
 }
 
 static int integer_clamp(int value, int low, int high) {
@@ -101,12 +117,26 @@ void config_normalize(AppConfig *config) {
     config->idle = (IdleContent)integer_clamp((int)config->idle, IDLE_CLOCK, IDLE_HIDDEN);
     config->idle_text[127] = L'\0';
     config->idle_font[31] = L'\0';
+    config->crab_name[63] = L'\0';
+    config->crab_model[95] = L'\0';
     config->monitor[31] = L'\0';
     if (!*config->idle_font)
         wcscpy(config->idle_font, L"Segoe UI");
+    trim_text(config->crab_name);
+    trim_text(config->crab_model);
+    if (!*config->crab_name)
+        wcscpy(config->crab_name, L"Crab");
+    if (!*config->crab_model)
+        wcscpy(config->crab_model, L"claude-opus-5-5");
     for (int i = 0; i < 127 && config->idle_text[i]; ++i)
         if (config->idle_text[i] < L' ')
             config->idle_text[i] = L' ';
+    for (int i = 0; i < 63 && config->crab_name[i]; ++i)
+        if (config->crab_name[i] < L' ')
+            config->crab_name[i] = L' ';
+    for (int i = 0; i < 95 && config->crab_model[i]; ++i)
+        if (config->crab_model[i] < L' ')
+            config->crab_model[i] = L' ';
     config->idle_font_size = integer_clamp(config->idle_font_size, 8, 48);
     config->idle_width = island_clamp(config->idle_width, 80, 1200);
     config->media_width = island_clamp(config->media_width, 160, 1200);
@@ -231,7 +261,9 @@ static bool write_number(const wchar_t *path, const wchar_t *name, double value)
     X(headphone_alert_ms)                                                                          \
     X(notifications_enabled)                                                                       \
     X(notification_content)                                                                        \
-    X(notification_alert_ms)
+    X(notification_alert_ms)                                                                       \
+    X(crab_enabled)                                                                                \
+    X(crab_speak)
 
 typedef struct {
     const wchar_t *name;
@@ -350,6 +382,18 @@ bool config_shortcuts_valid(const AppConfig *config) {
                 binding.modifiers == config->shortcuts[j].modifiers)
                 return false;
         }
+        if (i < SHORTCUT_GLOBAL_COUNT && binding.key == config->crab_shortcut.key &&
+            binding.modifiers == config->crab_shortcut.modifiers)
+            return false;
+    }
+    if (config->crab_shortcut.modifiers & ~(MOD_CONTROL | MOD_ALT | MOD_SHIFT | MOD_WIN))
+        return false;
+    if (config->crab_shortcut.key) {
+        wchar_t text[128];
+        ShortcutBinding parsed;
+        config_shortcut_text(config->crab_shortcut, text, 128);
+        if (!config_shortcut_parse(text, &parsed) || parsed.key != config->crab_shortcut.key)
+            return false;
     }
     return true;
 }
@@ -385,6 +429,9 @@ bool config_load(AppConfig *config, const wchar_t *path) {
                              path);
     GetPrivateProfileStringW(section, L"idle_font", config->idle_font, config->idle_font, 32, path);
     GetPrivateProfileStringW(section, L"monitor", L"", config->monitor, 32, path);
+    GetPrivateProfileStringW(section, L"crab_name", config->crab_name, config->crab_name, 64, path);
+    GetPrivateProfileStringW(section, L"crab_model", config->crab_model, config->crab_model, 96,
+                             path);
     for (int i = 0; i < TINT_COUNT; ++i) {
         wchar_t key[32];
         wchar_t value[32];
@@ -405,6 +452,12 @@ bool config_load(AppConfig *config, const wchar_t *path) {
             if (config_shortcut_parse(value, &binding))
                 config->shortcuts[i] = binding;
         }
+    }
+    wchar_t crab_shortcut[128];
+    if (GetPrivateProfileStringW(section, L"crab_shortcut", L"", crab_shortcut, 128, path)) {
+        ShortcutBinding binding;
+        if (config_shortcut_parse(crab_shortcut, &binding))
+            config->crab_shortcut = binding;
     }
     if (!config_shortcuts_valid(config)) {
         AppConfig defaults;
@@ -454,6 +507,10 @@ bool config_save(const AppConfig *input, const wchar_t *path) {
     saved =
         WritePrivateProfileStringW(INI_SECTION, L"idle_font", config.idle_font, temporary) && saved;
     saved = WritePrivateProfileStringW(INI_SECTION, L"monitor", config.monitor, temporary) && saved;
+    saved =
+        WritePrivateProfileStringW(INI_SECTION, L"crab_name", config.crab_name, temporary) && saved;
+    saved = WritePrivateProfileStringW(INI_SECTION, L"crab_model", config.crab_model, temporary) &&
+            saved;
     for (int i = 0; i < TINT_COUNT; ++i) {
         wchar_t key[32];
         wchar_t value[32];
@@ -468,6 +525,10 @@ bool config_save(const AppConfig *input, const wchar_t *path) {
         config_shortcut_text(config.shortcuts[i], value, 128);
         saved = WritePrivateProfileStringW(INI_SECTION, key, value, temporary) && saved;
     }
+    wchar_t crab_shortcut[128];
+    config_shortcut_text(config.crab_shortcut, crab_shortcut, 128);
+    saved = WritePrivateProfileStringW(INI_SECTION, L"crab_shortcut", crab_shortcut, temporary) &&
+            saved;
     (void)WritePrivateProfileStringW(NULL, NULL, NULL, temporary);
     if (saved)
         saved = MoveFileExW(temporary, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) !=

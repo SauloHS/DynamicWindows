@@ -2,6 +2,7 @@
 #define DYNAMICWINDOWS_APP_H
 
 #include "config.h"
+#include "crab.h"
 #include "headphones.h"
 #include "island.h"
 #include "media.h"
@@ -21,6 +22,7 @@
 #define WM_DYNAMICWINDOWS_ACCESS (WM_APP + 2)
 #define WM_DYNAMICWINDOWS_TRAY (WM_APP + 3)
 #define WM_DYNAMICWINDOWS_OUTSIDE (WM_APP + 4)
+#define WM_DYNAMICWINDOWS_CRAB_NOTIFY (WM_APP + 8)
 
 #define COLOR_SURFACE 0xff050506u
 #define COLOR_TEXT 0xfff5f5f7u
@@ -61,7 +63,8 @@ typedef enum {
     ACTION_SETTINGS,
     ACTION_TAB_NOTIFICATIONS,
     ACTION_NOTIFICATION_PREVIOUS,
-    ACTION_NOTIFICATION_NEXT
+    ACTION_NOTIFICATION_NEXT,
+    ACTION_CRAB
 } Action;
 
 typedef struct {
@@ -142,6 +145,7 @@ typedef struct App {
     bool hotkey_timer;
     bool hotkey_hide;
     bool hotkeys[SHORTCUT_GLOBAL_COUNT];
+    bool crab_hotkey;
     HHOOK outside_hook;
     POINT base_position;
     uint64_t event_until;
@@ -175,6 +179,12 @@ typedef struct App {
     HeadphoneSnapshot headphones;
     HeadphoneEvent headphone_event;
     NotificationService notification_service;
+    CrabService crab_service;
+    CrabState crab_state;
+    HRESULT crab_error;
+    wchar_t crab_transcript[768];
+    wchar_t crab_answer[2048];
+    double crab_phase;
     AppNotification notifications[NOTIFICATION_HISTORY];
     unsigned notification_count;
     unsigned notification_index;

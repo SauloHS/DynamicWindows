@@ -11,7 +11,7 @@
 #include <wctype.h>
 
 #define SETTINGS_PAGE_CLASS L"DynamicWindowsSettingsPage"
-#define SETTINGS_PAGE_COUNT 7
+#define SETTINGS_PAGE_COUNT 8
 #define SETTINGS_MARGIN 16
 #define COUNT_OF(items) (sizeof(items) / sizeof((items)[0]))
 
@@ -37,7 +37,8 @@ typedef enum {
     PAGE_MOTION,
     PAGE_BEHAVIOR,
     PAGE_SHORTCUTS,
-    PAGE_NOTIFICATIONS
+    PAGE_NOTIFICATIONS,
+    PAGE_CRAB
 } SettingsPage;
 
 typedef struct {
@@ -80,9 +81,9 @@ typedef struct {
      label,                                                                                        \
      help,                                                                                         \
      section}
-#define BUTTON(id, label, help, section)                                                           \
-    {id, PAGE_NOTIFICATIONS, FIELD_BUTTON, 0, 0, 0, label, help, section}
-#define STATUS(id, label, help) {id, PAGE_NOTIFICATIONS, FIELD_STATUS, 0, 0, 0, label, help, NULL}
+#define BUTTON(page, id, label, help, section)                                                     \
+    {id, page, FIELD_BUTTON, 0, 0, 0, label, help, section}
+#define STATUS(page, id, label, help) {id, page, FIELD_STATUS, 0, 0, 0, label, help, NULL}
 
 static const SettingsField fields[] = {
     CHOICE(ID_SETTINGS_IDLE, PAGE_IDLE, FIELD_IDLE, idle, IDLE_HIDDEN, L"&Idle content",
@@ -192,7 +193,7 @@ static const SettingsField fields[] = {
     BOOLEAN(ID_SETTINGS_VOLUME_ALERTS, PAGE_BEHAVIOR, volume_alerts, L"Show &volume alerts",
             L"Show the volume HUD when the volume changes.", L"Alerts and volume"),
     BOOLEAN(ID_SETTINGS_POWER_ALERTS, PAGE_BEHAVIOR, power_alerts, L"Show &power alerts",
-            L"Show charging or power alerts. Windows notification toasts are not read.", NULL),
+            L"Show charging or power alerts.", NULL),
     INTEGER(ID_SETTINGS_VOLUME_ALERT_MS, PAGE_BEHAVIOR, volume_alert_ms, 250, 15000,
             L"Volume alert duration", L"ms.", NULL),
     INTEGER(ID_SETTINGS_POWER_ALERT_MS, PAGE_BEHAVIOR, power_alert_ms, 250, 15000,
@@ -280,10 +281,30 @@ static const SettingsField fields[] = {
             L"When off, DynamicWindows shows only the source application.", NULL),
     INTEGER(ID_SETTINGS_NOTIFICATION_ALERT_MS, PAGE_NOTIFICATIONS, notification_alert_ms, 500,
             15000, L"Notification preview duration", L"ms.", L"Island behavior"),
-    BUTTON(ID_SETTINGS_NOTIFICATION_ACCESS, L"Request Windows access",
+    BUTTON(PAGE_NOTIFICATIONS, ID_SETTINGS_NOTIFICATION_ACCESS, L"Request Windows access",
            L"Windows displays its own permission prompt. DynamicWindows cannot bypass it.",
            L"Windows access"),
-    STATUS(ID_SETTINGS_NOTIFICATION_STATUS, L"Current access", L"Current listener state."),
+    STATUS(PAGE_NOTIFICATIONS, ID_SETTINGS_NOTIFICATION_STATUS, L"Current access",
+           L"Current listener state."),
+
+    BOOLEAN(ID_SETTINGS_CRAB_ENABLED, PAGE_CRAB, crab_enabled, L"Enable Crab",
+            L"Allows the configurable global shortcut to start microphone capture.",
+            L"Voice assistant"),
+    BOOLEAN(ID_SETTINGS_CRAB_SPEAK, PAGE_CRAB, crab_speak, L"Speak answers aloud",
+            L"Use the installed Windows text-to-speech voice.", NULL),
+    STRING(ID_SETTINGS_CRAB_NAME, PAGE_CRAB, FIELD_TEXT, crab_name, 63, L"Wake name",
+           L"Say this name first, followed by the question. Up to 63 characters.", L"Activation"),
+    STRING(ID_SETTINGS_CRAB_MODEL, PAGE_CRAB, FIELD_TEXT, crab_model, 95, L"Claude model",
+           L"Anthropic model ID. Default: claude-opus-5-5.", NULL),
+    BUTTON(PAGE_CRAB, ID_SETTINGS_CRAB_KEY, L"Connect API key",
+           L"Stores the key in Windows Credential Manager, never settings.ini.",
+           L"Anthropic connection"),
+    BUTTON(PAGE_CRAB, ID_SETTINGS_CRAB_DELETE_KEY, L"Remove API key",
+           L"Deletes Crab's credential from Windows Credential Manager.", NULL),
+    STATUS(PAGE_CRAB, ID_SETTINGS_CRAB_STATUS, L"Connection status",
+           L"Current credential and assistant state."),
+    STRING(ID_SETTINGS_CRAB_SHORTCUT, PAGE_CRAB, FIELD_SHORTCUT, crab_shortcut, 127,
+           L"Start Crab shortcut", L"Global shortcut. Type Ctrl+Alt+Space or None.", NULL),
 };
 
 #undef INTEGER
@@ -296,8 +317,8 @@ static const SettingsField fields[] = {
 #undef BUTTON
 #undef STATUS
 
-static const wchar_t *const page_names[] = {L"Idle",     L"Layout",    L"Appearance",   L"Motion",
-                                            L"Behavior", L"Shortcuts", L"Notifications"};
+static const wchar_t *const page_names[] = {L"Idle",     L"Layout",    L"Appearance",    L"Motion",
+                                            L"Behavior", L"Shortcuts", L"Notifications", L"Crab"};
 static const wchar_t *const idle_choices[] = {
     L"Clock", L"Date", L"Clock + date", L"Custom text", L"Battery", L"Volume", L"Blank", L"Hidden"};
 static const wchar_t *const anchor_choices[] = {L"Top left",    L"Top center",    L"Top right",
@@ -305,7 +326,7 @@ static const wchar_t *const anchor_choices[] = {L"Top left",    L"Top center",  
                                                 L"Bottom left", L"Bottom center", L"Bottom right"};
 
 _Static_assert(COUNT_OF(page_names) == SETTINGS_PAGE_COUNT, "Settings tab count must match");
-_Static_assert(ID_SETTINGS_PAGE_NOTIFICATIONS - ID_SETTINGS_PAGE_IDLE + 1 == SETTINGS_PAGE_COUNT,
+_Static_assert(ID_SETTINGS_PAGE_CRAB - ID_SETTINGS_PAGE_IDLE + 1 == SETTINGS_PAGE_COUNT,
                "Settings page IDs must match tabs");
 _Static_assert(ID_SETTINGS_SHORTCUT_END - ID_SETTINGS_SHORTCUT_ISLAND + 1 == SHORTCUT_COUNT,
                "Every shortcut needs a settings control");
@@ -409,6 +430,17 @@ static size_t field_index(int id) {
             return i;
     }
     return COUNT_OF(fields);
+}
+
+static void crab_status(SettingsState *state) {
+    size_t index = field_index(ID_SETTINGS_CRAB_STATUS);
+    if (index == COUNT_OF(fields))
+        return;
+    wchar_t text[256];
+    swprintf(text, COUNT_OF(text),
+             crab_key_exists() ? L"API key connected. %ls." : L"No API key connected. %ls.",
+             crab_state_text(state->app->crab_state));
+    SetWindowTextW(state->controls[index].control, text);
 }
 
 static void set_text(HWND window, const wchar_t *text) {
@@ -571,7 +603,12 @@ static bool create_field(SettingsState *state, size_t index) {
         return false;
     if (field->kind == FIELD_STATUS) {
         wchar_t status[256];
-        notifications_status(&state->app->notification_service, status, COUNT_OF(status));
+        if (field->id == ID_SETTINGS_CRAB_STATUS)
+            swprintf(status, COUNT_OF(status),
+                     crab_key_exists() ? L"API key connected. %ls." : L"No API key connected. %ls.",
+                     crab_state_text(state->app->crab_state));
+        else
+            notifications_status(&state->app->notification_service, status, COUNT_OF(status));
         SetWindowTextW(control->control, status);
     } else if (field->kind == FIELD_FONT) {
         static const wchar_t *const fonts[] = {L"Segoe UI", L"Arial",  L"Calibri",
@@ -622,9 +659,10 @@ static bool create_form(SettingsState *state) {
     if (!state->title || !state->hint || !state->tabs)
         return false;
     SendMessageW(state->title, WM_SETFONT, (WPARAM)state->title_font, FALSE);
-    describe_control(state, state->tabs, L"Settings categories",
-                     L"Idle, Layout, Appearance, Motion, Behavior, Shortcuts, and Notifications. "
-                     L"Control+Tab switches categories.");
+    describe_control(
+        state, state->tabs, L"Settings categories",
+        L"Idle, Layout, Appearance, Motion, Behavior, Shortcuts, Notifications, and Crab. "
+        L"Control+Tab switches categories.");
     for (int i = 0; i < SETTINGS_PAGE_COUNT; ++i) {
         TCITEMW item = {.mask = TCIF_TEXT, .pszText = (wchar_t *)page_names[i]};
         if (TabCtrl_InsertItem(state->tabs, i, &item) < 0)
@@ -710,7 +748,13 @@ static void fill_form(SettingsState *state, const AppConfig *config) {
         switch (field->kind) {
         case FIELD_STATUS: {
             wchar_t status[256];
-            notifications_status(&state->app->notification_service, status, COUNT_OF(status));
+            if (field->id == ID_SETTINGS_CRAB_STATUS)
+                swprintf(status, COUNT_OF(status),
+                         crab_key_exists() ? L"API key connected. %ls."
+                                           : L"No API key connected. %ls.",
+                         crab_state_text(state->app->crab_state));
+            else
+                notifications_status(&state->app->notification_service, status, COUNT_OF(status));
             SetWindowTextW(control, status);
             break;
         }
@@ -841,9 +885,11 @@ static bool read_field(SettingsState *state, size_t index, AppConfig *config) {
         return false;
     GetWindowTextW(control, text, (int)COUNT_OF(text));
     if (field->kind == FIELD_TEXT || field->kind == FIELD_FONT) {
-        if (length > (int)field->maximum || (field->kind == FIELD_FONT && !*text))
+        bool required = field->kind == FIELD_FONT || field->id == ID_SETTINGS_CRAB_NAME ||
+                        field->id == ID_SETTINGS_CRAB_MODEL;
+        if (length > (int)field->maximum || (required && !*text))
             return false;
-        if (field->kind == FIELD_FONT) {
+        if (required) {
             const wchar_t *letter = text;
             while (*letter && iswspace(*letter))
                 ++letter;
@@ -911,11 +957,14 @@ static void update_field_help(SettingsState *state, size_t index, const AppConfi
     FieldControl *control = &state->controls[index];
     wchar_t text[160];
     field_help(&fields[index], config, control->invalid, text, COUNT_OF(text));
-    if (control->duplicate)
+    if (control->duplicate) {
+        bool global = fields[index].id == ID_SETTINGS_CRAB_SHORTCUT ||
+                      (fields[index].id >= ID_SETTINGS_SHORTCUT_ISLAND &&
+                       fields[index].id < ID_SETTINGS_SHORTCUT_ISLAND + SHORTCUT_GLOBAL_COUNT);
         swprintf(text, COUNT_OF(text),
                  L"Another %ls shortcut uses this binding. Choose a different binding or None.",
-                 fields[index].id < ID_SETTINGS_SHORTCUT_ISLAND + SHORTCUT_GLOBAL_COUNT ? L"global"
-                                                                                        : L"local");
+                 global ? L"global" : L"local");
+    }
     set_text(control->help, text);
     describe_control(state, control->control, fields[index].label, text);
     if (control->invalid)
@@ -932,6 +981,7 @@ static void update_field_help(SettingsState *state, size_t index, const AppConfi
 static void validate_shortcuts(SettingsState *state, const AppConfig *config) {
     if (config_shortcuts_valid(config))
         return;
+    size_t crab = field_index(ID_SETTINGS_CRAB_SHORTCUT);
     for (int i = 0; i < SHORTCUT_COUNT; ++i) {
         size_t index = field_index(ID_SETTINGS_SHORTCUT_ISLAND + i);
         ShortcutBinding binding = config->shortcuts[i];
@@ -948,6 +998,12 @@ static void validate_shortcuts(SettingsState *state, const AppConfig *config) {
                 continue;
             state->controls[index].duplicate = true;
             state->controls[other].duplicate = true;
+        }
+        if (i < SHORTCUT_GLOBAL_COUNT && crab < COUNT_OF(fields) &&
+            !state->controls[crab].invalid && config->crab_shortcut.key == binding.key &&
+            config->crab_shortcut.modifiers == binding.modifiers) {
+            state->controls[index].duplicate = true;
+            state->controls[crab].duplicate = true;
         }
     }
     for (size_t i = 0; i < COUNT_OF(fields); ++i) {
@@ -1508,6 +1564,22 @@ static void handle_command(SettingsState *state, WPARAM wparam, LPARAM lparam) {
         ensure_visible(state, control);
     if (state->loading)
         return;
+    if (id == ID_SETTINGS_CRAB_KEY && notification == BN_CLICKED) {
+        if (crab_key_prompt(state->window))
+            status_text(state, L"Crab API key saved in Windows Credential Manager.", false);
+        else
+            status_text(state, L"The API key was not saved.", true);
+        crab_status(state);
+        return;
+    }
+    if (id == ID_SETTINGS_CRAB_DELETE_KEY && notification == BN_CLICKED) {
+        if (crab_key_delete())
+            status_text(state, L"Crab API key removed.", false);
+        else
+            status_text(state, L"Windows could not remove the API key.", true);
+        crab_status(state);
+        return;
+    }
     if (id == ID_SETTINGS_NOTIFICATION_ACCESS && notification == BN_CLICKED) {
         if (notifications_request(&state->app->notification_service, state->app->window))
             status_text(state, L"Windows notification permission requested.", false);

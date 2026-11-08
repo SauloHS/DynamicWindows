@@ -37,6 +37,7 @@ ctest --test-dir build -R '^core$' --output-on-failure
 ctest --test-dir build -R '^configuration$' --output-on-failure
 ctest --test-dir build -R '^headphones$' --output-on-failure
 ctest --test-dir build -R '^notifications$' --output-on-failure
+ctest --test-dir build -R '^crab$' --output-on-failure
 ctest --test-dir build -R '^native_smoke$' --output-on-failure
 ```
 
@@ -44,6 +45,7 @@ ctest --test-dir build -R '^native_smoke$' --output-on-failure
 - `configuration`: defaults, validation, placement, malformed input, and Unicode save/load.
 - `headphones`: synthetic connection/battery state; no device interaction.
 - `notifications`: duplicate suppression, sanitation, and access labels; no permission prompt or real notification access.
+- `crab`: wake phrase, JSON encoding/response extraction, and states; no microphone, network, credentials, speech, or GUI.
 - `native_smoke`: launches the actual renderer, writes PNGs to `build/smoke`, and checks transparent hit-testing and MSAA names/roles. It does not prove every interactive behavior.
 
 Honor an explicit request to skip tests. Report skipped checks; do not present an earlier pass as proof of newly changed code. Documentation-only changes do not need application tests.
@@ -79,6 +81,7 @@ These checks move the pointer, manipulate focus, and capture screenshots. `--liv
 | Core Audio output/mute/peak and system power | `platform.c` |
 | Headphone connections and driver-reported Bluetooth battery | Dedicated MTA worker and snapshot/delta contract in `headphones.c/.h` |
 | Opt-in Notification Center mirroring | `notifications.c/.h`; package identity + Windows permission required |
+| Opt-in Crab voice assistant | `crab.c/.h`; SAPI capture/TTS, WinHTTP Claude request, Credential Manager key |
 | Defaults, normalization, INI persistence, shortcut parsing | `config.c/.h` |
 | Modeless native settings, draft/baseline, validation, preview | `settings.c/.h` |
 | Screen-reader object, roles, names, values, actions | `accessibility.c` |
@@ -128,6 +131,12 @@ The `headphones` CTest target is headless and uses synthetic snapshots. The orig
 
 The portable executable cannot use this protected listener. The optional package manifest and package script produce an unsigned MSIX; users must sign it with their own trusted certificate before normal installation. Do not recommend disabling Windows security or bypassing signature enforcement.
 
+### Crab
+
+Crab is opt-in and push-to-talk. Never start microphone capture merely because the app starts or a setting loads. `SHORTCUT_CRAB` activates one bounded SAPI dictation session; the recognized text must start with configured `crab_name`. The worker sends only the remaining question to `https://api.anthropic.com/v1/messages` through WinHTTP, using model `claude-opus-5-5` by default, API version `2026-10-21`, bounded timeouts/response size, and no client tools. Store the Anthropic API key only in Windows Credential Manager under `DynamicWindows/Crab/AnthropicApiKey`; never persist or log it. Zero temporary key buffers.
+
+Crab owns listening/thinking/speaking/error state. While active, `app_target_size()` returns the 72 × 72 ball and the renderer uses the original layered liquid-glass orb rather than the normal black pill, media background, or side bubbles. Reduced motion freezes the phase but preserves distinct state colors and accessible state names. Clicking the orb or pressing the shortcut again cancels. Windows text-to-speech is optional. The `crab` test target is headless and must not access microphone, network, credentials, speech, or GUI.
+
 ### Configuration transactions
 
 `%LOCALAPPDATA%\DynamicWindows\settings.ini` is personal state. Legacy MacNotch settings are read only as a fallback; Apply writes to the new profile and does not delete the old file.
@@ -144,4 +153,4 @@ A version change spans **CMake**, `resources/dynamicwindows.rc`, `resources/dyna
 
 The release is unsigned; do not describe it as signed or recommend disabling Windows security. Retain GPL license/About notices and source availability.
 
-The app currently has no telemetry, microphone/camera capture, or background network requests. Notification Center mirroring is opt-in, package-gated, and permission-gated; it must remain off by default. The camera-style dot is decorative. Apple services and calls are not implemented; do not imply those integrations exist or substitute simulated activity outside explicit demo mode.
+The app currently has no telemetry or camera capture. Microphone capture occurs only during explicit Crab push-to-talk activation; Crab sends the recognized question to Anthropic when enabled. Notification Center mirroring is opt-in, package-gated, and permission-gated; it must remain off by default. The camera-style dot is decorative. Apple services and calls are not implemented; do not imply those integrations exist or substitute simulated activity outside explicit demo mode.

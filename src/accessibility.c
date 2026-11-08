@@ -186,7 +186,8 @@ static HRESULT STDMETHODCALLTYPE accessible_role(IAccessible *client, VARIANT ch
         return S_OK;
     Action action = accessible->app->hits[index].action;
     result->lVal = action == ACTION_VOLUME || action == ACTION_SEEK ? ROLE_SYSTEM_SLIDER
-                   : action >= ACTION_TAB_MEDIA && action <= ACTION_TAB_SYSTEM
+                   : (action >= ACTION_TAB_MEDIA && action <= ACTION_TAB_SYSTEM) ||
+                           action == ACTION_TAB_NOTIFICATIONS
                        ? ROLE_SYSTEM_PAGETAB
                        : ROLE_SYSTEM_PUSHBUTTON;
     return S_OK;

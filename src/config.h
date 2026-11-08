@@ -121,6 +121,11 @@ typedef struct {
     bool notifications_enabled;
     bool notification_content;
     int notification_alert_ms;
+    bool crab_enabled;
+    bool crab_speak;
+    ShortcutBinding crab_shortcut;
+    wchar_t crab_name[64];
+    wchar_t crab_model[96];
     ShortcutBinding shortcuts[SHORTCUT_COUNT];
 } AppConfig;
 

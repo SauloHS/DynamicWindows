@@ -34,7 +34,7 @@ DynamicWindows brings a Dynamic Island-inspired activity surface to **Windows 10
 - **System controls without the detour.** Adjust volume and mute, see power changes, and open the actual Windows Search panel.
 - **Headphones, without guessing.** Connection and disconnection alerts for wired/USB headphones and Bluetooth audio, plus battery levels when Windows reports them.
 - **Motion with continuity.** Interruptible springs, adjustable damping, and slide-and-fade hide/show transitions. Windows' reduced-motion setting is respected.
-- **Yours to configure.** Seven native settings tabs, live preview, saved preferences, monitor placement, colors, notifications, and customizable app shortcuts.
+- **Yours to configure.** Eight native settings tabs, live preview, saved preferences, monitor placement, colors, notifications, Crab, and customizable shortcuts.
 
 > **Early release:** v0.1.0 is a usable first version, not a finished operating-system component. Media support depends on what your player exposes to Windows. Bug reports with reproduction steps are welcome.
 
@@ -63,6 +63,7 @@ The release is **unsigned**. Windows may display a SmartScreen or publisher warn
 | Hide or show the island | **Ctrl + Alt + H** |
 | Open settings | **Ctrl + Alt + C** |
 | Open Windows Search | **Ctrl + Alt + F** |
+| Start or cancel Crab | **Ctrl + Alt + Space** |
 | Collapse the focused island | **Escape** |
 | Switch to media / timer / system | **1 / 2 / 3** |
 | Open settings from the focused island | **F2** or **Ctrl + Comma** |
@@ -107,6 +108,14 @@ Notification mirroring is **off by default**. It requires the optional MSIX inst
 
 Allowed toast notifications briefly appear on the island and remain available in the expanded **Alerts** view. Source-only mode hides title/body content. DynamicWindows only reads notifications when enabled; it does not dismiss or modify the originals. The portable executable continues to work, but cannot access this protected API.
 
+### Crab voice assistant
+
+Crab is an **opt-in** native voice assistant. Enable it in **Crab**, connect an Anthropic API key, then press **Ctrl + Alt + Space** and say the configured wake name followed by a question—for example, “Crab, what’s 1 + 1?” Change the wake name to “Siri” or another phrase if preferred.
+
+Activation morphs the island into an original liquid-glass orb. Cyan, violet, and magenta layers distinguish listening, thinking, and speaking without relying on text; reduced motion uses a stable glass state. Windows Speech Recognition performs local transcription, Anthropic’s Messages API generates the answer with `claude-opus-5-5` by default, and Windows text-to-speech can read it aloud.
+
+The API key is stored in **Windows Credential Manager**, never `settings.ini`. Crab sends only the recognized question to `api.anthropic.com` after activation. It has no OS-control tools and cannot claim to have performed actions. Microphone capture starts only from the Crab shortcut, not continuously in the background. Press the shortcut again or click the orb to cancel.
+
 ### Timers and system activity
 
 Choose a 1-, 5-, 15-, or 25-minute preset, or set a different initial duration in settings. Completion produces an alert and optional sound. Timers use a monotonic deadline, including after sleep, but **do not survive quitting the app**.
@@ -130,6 +139,7 @@ Open settings with **Ctrl + Alt + C**, **right-click → Customize DynamicWindow
 | **Behavior** | Activity visibility, artwork background, waveform, media details, preview duration, volume/power alerts, hover delays, timer sound, and full-screen hiding. |
 | **Shortcuts** | Global and local key bindings, with duplicate validation and optional disabling. |
 | **Notifications** | Explicit Windows permission, source-only privacy mode, preview duration, and current access status. |
+| **Crab** | Voice-assistant opt-in, wake name, Claude model, spoken replies, and secure API-key connection. |
 
 <p align="center"><img src="assets/settings.png" alt="DynamicWindows native settings window" width="760" /></p>
 
@@ -165,8 +175,9 @@ MSIX installation requires a trusted code-signing certificate. Pass its exact su
 
 ## Privacy, honestly
 
-- No app network requests, telemetry, accounts, or cloud configuration.
-- No microphone capture, audio recording, camera access, or screen recording.
+- No background app network requests, telemetry, accounts, or cloud configuration. Crab contacts Anthropic only after explicit activation.
+- No continuous microphone capture, audio recording, camera access, or screen recording.
+- Crab uses the microphone only after explicit shortcut activation and sends the recognized question to Anthropic when enabled.
 - No notification access unless explicitly enabled and granted by Windows.
 - Media metadata comes from **Windows GSMTC**. The waveform uses an audio-output peak meter.
 - An outside-click listener is active for manually opened controls; it closes the island without swallowing the click.
@@ -215,9 +226,10 @@ cmake --build build --target lint
 - **Configuration tests:** defaults, Unicode persistence, limits, placement, malformed input, and notification privacy defaults.
 - **Notification tests:** duplicate suppression, baseline handling, text sanitation, bounded history, and permission-state labels. They do not request permission or read real notifications.
 - **Headphone tests:** connection/disconnection deltas, Bluetooth identity, validated battery values, unavailable battery text, and bounded events. No mouse, audio changes, or hardware required.
+- **Crab tests:** wake-name parsing, JSON escaping, Messages API text extraction, and state labels. They do not use microphone, network, credentials, speech, or GUI.
 - **Native smoke:** renders representative states and checks alpha hit-testing and accessibility names/roles.
 
-Optional GUI checks require Python 3 and an interactive Windows desktop. They move the pointer, foreground the test app, and save local screenshots. The settings check also verifies the Notifications page without pressing its permission button. Quit any existing instance first, and do not share screenshots containing private desktop content.
+Optional GUI checks require Python 3 and an interactive Windows desktop. They move the pointer, foreground the test app, and save local screenshots. The settings check also verifies the Notifications and Crab pages without pressing permission or API-key buttons. Quit any existing instance first, and do not share screenshots containing private desktop content.
 
 ```powershell
 python -I tests/gui_check.py build/DynamicWindows.exe build/smoke --settings

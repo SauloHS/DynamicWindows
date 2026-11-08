@@ -592,10 +592,60 @@ static double headphone_status(App *app, const HeadphoneDevice *device, bool idl
     return idle ? 0 : battery ? size * 2 + 20 : size + 12;
 }
 
+static void crab_orb(App *app) {
+    Renderer *renderer = &app->renderer;
+    RectF body = renderer->body;
+    double size = fmin(body.Width, body.Height);
+    double x = body.X + (body.Width - size) / 2;
+    double y = body.Y + (body.Height - size) / 2;
+    RectF orb = {(REAL)x, (REAL)y, (REAL)size, (REAL)size};
+    double phase = app->reduced_motion ? 0.7 : app->crab_phase;
+    fill(renderer, orb, size / 2, 0xd81b1b24u);
+    double opacity = renderer->opacity;
+    for (int i = 0; i < 5; ++i) {
+        double angle = phase + i * 1.25663706144;
+        double blob = size * (0.44 + 0.04 * sin(phase * 1.7 + i));
+        double cx = x + size / 2 + cos(angle) * size * 0.13;
+        double cy = y + size / 2 + sin(angle * 1.13) * size * 0.13;
+        static const ARGB colors[] = {0x9078e8ffu, 0x908d7cffu, 0x90ef75d5u, 0x9072f4d0u,
+                                      0x90a8a0ffu};
+        renderer->opacity = opacity * 0.72;
+        fill(renderer,
+             (RectF){(REAL)(cx - blob / 2), (REAL)(cy - blob / 2), (REAL)blob, (REAL)blob},
+             blob / 2, colors[i]);
+    }
+    renderer->opacity = opacity * 0.54;
+    fill(renderer,
+         (RectF){(REAL)(x + size * 0.18), (REAL)(y + size * 0.10), (REAL)(size * 0.52),
+                 (REAL)(size * 0.25)},
+         size * 0.13, 0xb8ffffffu);
+    renderer->opacity = opacity;
+    outline(renderer, (RectF){orb.X + 1, orb.Y + 1, orb.Width - 2, orb.Height - 2}, size / 2,
+            0xb8ffffffu, 1.4);
+    double pulse = app->reduced_motion ? 0.72 : 0.65 + 0.25 * sin(phase * 2.2);
+    renderer->opacity = opacity * pulse;
+    outline(renderer,
+            (RectF){(REAL)(x + size * 0.09), (REAL)(y + size * 0.09), (REAL)(size * 0.82),
+                    (REAL)(size * 0.82)},
+            size * 0.41,
+            app->crab_state == CRAB_THINKING   ? 0xffb184ffu
+            : app->crab_state == CRAB_SPEAKING ? 0xffff83d8u
+                                               : 0xff84e7ffu,
+            2.3);
+    renderer->opacity = opacity;
+}
+
 static void compact(App *app, bool add_hits) {
     Renderer *renderer = &app->renderer;
     RectF body = renderer->body;
     double middle = body.Y + body.Height / 2;
+    if (app->crab_state == CRAB_LISTENING || app->crab_state == CRAB_THINKING ||
+        app->crab_state == CRAB_SPEAKING) {
+        crab_orb(app);
+        if (add_hits)
+            hit_add(app, body, ACTION_CRAB, true, L"Cancel Crab voice assistant");
+        return;
+    }
     wchar_t label[600];
     app_summary(app, label, 600);
     if (add_hits)
@@ -1183,9 +1233,11 @@ bool renderer_draw(App *app) {
     double width = island_clamp(app->width.value, 40, app->canvas_width - 20);
     double height = island_clamp(app->height.value, 20, app->canvas_height - 20);
     double bubble = island_clamp(app->bubble.value, 0, app->config.bubble_size * 1.12);
-    double headphone_bubble =
-        island_clamp(app->headphone_bubble.value, 0,
-                     fmax(app->config.compact_height, app->config.timer_height) * 1.12);
+    double current_headphone_size =
+        app_headphones(app) && app_primary(app) != ACTIVITY_NONE ? height : 0;
+    double headphone_bubble = current_headphone_size;
+    double headphone_reveal =
+        island_clamp(app->headphone_bubble.value / fmax(1, current_headphone_size), 0, 1);
     double gap = bubble > 0.5 ? app->config.bubble_gap : 0;
     double headphone_gap = headphone_bubble > 0.5 ? app->config.bubble_gap : 0;
     double total = width + (bubble > 0.5 ? bubble + gap : 0) +
@@ -1210,16 +1262,21 @@ bool renderer_draw(App *app) {
                 (REAL)headphone_bubble, (REAL)headphone_bubble};
     RectF body = renderer->body;
     double opacity = renderer->opacity;
-    renderer->opacity *= renderer->shadow;
-    for (int i = 3; i >= 1; --i)
-        fill(renderer,
-             (RectF){body.X - i * 2, body.Y + 3 - i, body.Width + i * 4, body.Height + i * 3},
-             renderer->radius + i * 2, i == 1 ? 0x22000000u : 0x0b000000u);
-    renderer->opacity = opacity;
-    fill(renderer, body, renderer->radius, COLOR_SURFACE);
-    if (renderer->border_width > 0)
-        outline(renderer, (RectF){body.X + 0.5f, body.Y + 0.5f, body.Width - 1, body.Height - 1},
-                fmax(0, renderer->radius - 0.5), COLOR_BORDER, renderer->border_width);
+    bool crab_active = app->crab_state == CRAB_LISTENING || app->crab_state == CRAB_THINKING ||
+                       app->crab_state == CRAB_SPEAKING;
+    if (!crab_active) {
+        renderer->opacity *= renderer->shadow;
+        for (int i = 3; i >= 1; --i)
+            fill(renderer,
+                 (RectF){body.X - i * 2, body.Y + 3 - i, body.Width + i * 4, body.Height + i * 3},
+                 renderer->radius + i * 2, i == 1 ? 0x22000000u : 0x0b000000u);
+        renderer->opacity = opacity;
+        fill(renderer, body, renderer->radius, COLOR_SURFACE);
+        if (renderer->border_width > 0)
+            outline(renderer,
+                    (RectF){body.X + 0.5f, body.Y + 0.5f, body.Width - 1, body.Height - 1},
+                    fmax(0, renderer->radius - 0.5), COLOR_BORDER, renderer->border_width);
+    }
     app->hit_count = 0;
     GpPath *clip = round_path(body, renderer->radius);
     if (clip) {
@@ -1227,13 +1284,17 @@ bool renderer_draw(App *app) {
         GdipDeletePath(clip);
     }
     double opened = island_clamp(app->reveal.value, 0, 1);
-    if (app->media.available && app->island.view == ISLAND_MEDIA)
+    if (!crab_active && app->media.available && app->island.view == ISLAND_MEDIA)
         media_background(app, body, opened);
-    if (opened < 0.999) {
+    if (crab_active) {
+        renderer->opacity = 1;
+        compact(app, true);
+    }
+    if (!crab_active && opened < 0.999) {
         renderer->opacity = 1 - opened;
         compact(app, !app->island.expanded && opened < 0.25);
     }
-    if (opened > 0.001) {
+    if (!crab_active && opened > 0.001) {
         renderer->opacity = opened;
         double scale = fmin(width / 408, height / 264);
         scale = island_clamp(scale, 0.1, 3.1);
@@ -1269,7 +1330,7 @@ bool renderer_draw(App *app) {
     }
     GdipResetClip(renderer->graphics);
     renderer->opacity = island_clamp(bubble / app->config.bubble_size, 0, 1);
-    if (bubble > 1) {
+    if (!crab_active && bubble > 1) {
         fill(renderer, renderer->bubble, bubble / 2,
              app->hover == ACTION_SECONDARY ? COLOR_HOVER : COLOR_SURFACE);
         if (renderer->border_width > 0)
@@ -1289,11 +1350,9 @@ bool renderer_draw(App *app) {
                     secondary == ACTIVITY_TIMER ? L"Expand countdown timer"
                                                 : L"Expand media controls");
     }
-    renderer->opacity = island_clamp(
-        headphone_bubble / fmax(1, fmax(app->config.compact_height, app->config.timer_height)), 0,
-        1);
+    renderer->opacity = headphone_reveal;
     const HeadphoneDevice *connected = app_headphones(app);
-    if (headphone_bubble > 1 && connected) {
+    if (!crab_active && headphone_bubble > 1 && connected) {
         RectF rect = renderer->headphone_bubble;
         double center_x = rect.X + headphone_bubble / 2;
         double center_y = rect.Y + headphone_bubble / 2;
@@ -1347,6 +1406,14 @@ int app_hit(const App *app, double x, double y) {
 bool app_inside(const App *app, double x, double y) {
     const Renderer *renderer = &app->renderer;
     RectF body = renderer->body;
+    bool crab_active = app->crab_state == CRAB_LISTENING || app->crab_state == CRAB_THINKING ||
+                       app->crab_state == CRAB_SPEAKING;
+    if (crab_active) {
+        double diameter = fmin(body.Width, body.Height);
+        double orb_x = body.X + (body.Width - diameter) / 2;
+        double orb_y = body.Y + (body.Height - diameter) / 2;
+        return island_contains(x - orb_x, y - orb_y, diameter, diameter, diameter / 2);
+    }
     if (island_contains(x - body.X, y - body.Y, body.Width, body.Height, renderer->radius))
         return true;
     RectF bubble = renderer->bubble;
