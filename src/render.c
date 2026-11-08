@@ -647,9 +647,6 @@ static void compact(App *app, bool add_hits) {
         headphone_status(app, headphones, true, false);
         return;
     }
-    RectF content = body;
-    if (headphones)
-        content.Width -= (REAL)headphone_status(app, headphones, false, add_hits);
     if (primary == ACTIVITY_MEDIA) {
         REAL icon_size = (REAL)fmin(28, fmax(10, body.Height - 12));
         RectF icon = {body.X + 8, (REAL)(middle - icon_size / 2), icon_size, icon_size};
@@ -662,7 +659,7 @@ static void compact(App *app, bool add_hits) {
         }
         double peek = island_clamp(app->media_peek.value, 0, 1);
         REAL text_left = icon.X + icon_size + 10;
-        REAL text_right = content.X + content.Width - (app->config.waveform ? 46 : 8);
+        REAL text_right = body.X + body.Width - (app->config.waveform ? 46 : 8);
         if (peek > 0.01 && text_right > text_left) {
             double opacity = renderer->opacity;
             renderer->opacity *= peek;
@@ -673,18 +670,17 @@ static void compact(App *app, bool add_hits) {
         }
         if (app->config.waveform) {
             double wave_height = fmin(22, fmax(3, body.Height - 12));
-            waveform(app, content.X + content.Width - 38, middle - wave_height / 2, 28,
-                     wave_height);
+            waveform(app, body.X + body.Width - 38, middle - wave_height / 2, 28, wave_height);
         }
     } else if (primary == ACTIVITY_TIMER) {
         wchar_t clock[32];
         app_clock(app->island.timer.remaining, clock, 32);
         glyph(renderer, GLYPH_TIMER, body.X + 25, middle, 19, COLOR_TIMER);
-        text(renderer, clock, (RectF){body.X + 46, (REAL)(middle - 14), content.Width - 91, 28},
+        text(renderer, clock, (RectF){body.X + 46, (REAL)(middle - 14), body.Width - 91, 28},
              FONT_TITLE, COLOR_TEXT, StringAlignmentCenter);
-        timer_ring(app, content.X + content.Width - 28, middle, 23);
+        timer_ring(app, body.X + body.Width - 28, middle, 23);
         if (app->island.timer.paused)
-            glyph(renderer, GLYPH_PAUSE, content.X + content.Width - 28, middle, 11, COLOR_TIMER);
+            glyph(renderer, GLYPH_PAUSE, body.X + body.Width - 28, middle, 11, COLOR_TIMER);
     } else {
         wchar_t idle_label[256];
         app_idle_label(app, idle_label, 256);
@@ -1117,8 +1113,12 @@ bool renderer_draw(App *app) {
     double width = island_clamp(app->width.value, 40, app->canvas_width - 20);
     double height = island_clamp(app->height.value, 20, app->canvas_height - 20);
     double bubble = island_clamp(app->bubble.value, 0, app->config.bubble_size * 1.12);
+    double headphone_bubble =
+        island_clamp(app->headphone_bubble.value, 0, app->config.media_extra_width * 1.12);
     double gap = bubble > 0.5 ? app->config.bubble_gap : 0;
-    double total = width + (bubble > 0.5 ? bubble + gap : 0);
+    double headphone_gap = headphone_bubble > 0.5 ? app->config.bubble_gap : 0;
+    double total = width + (bubble > 0.5 ? bubble + gap : 0) +
+                   (headphone_bubble > 0.5 ? headphone_bubble + headphone_gap : 0);
     double reference = config_reference_width(&app->config);
     double left = (app->canvas_width - reference) / 2;
     int horizontal = app->config.anchor % 3;
@@ -1133,6 +1133,10 @@ bool renderer_draw(App *app) {
     renderer->radius = island_clamp(app->radius.value, 0, fmin(width, height) / 2);
     renderer->bubble = (RectF){(REAL)(x + width + gap), (REAL)(y + (height - bubble) / 2),
                                (REAL)bubble, (REAL)bubble};
+    double headphone_x = x + width + (bubble > 0.5 ? bubble + gap : 0) + headphone_gap;
+    renderer->headphone_bubble =
+        (RectF){(REAL)headphone_x, (REAL)(y + (height - headphone_bubble) / 2),
+                (REAL)headphone_bubble, (REAL)headphone_bubble};
     RectF body = renderer->body;
     double opacity = renderer->opacity;
     renderer->opacity *= renderer->shadow;
@@ -1212,6 +1216,28 @@ bool renderer_draw(App *app) {
                     secondary == ACTIVITY_TIMER ? L"Expand countdown timer"
                                                 : L"Expand media controls");
     }
+    renderer->opacity =
+        island_clamp(headphone_bubble / fmax(1, app->config.media_extra_width), 0, 1);
+    const HeadphoneDevice *connected = app_headphones(app);
+    if (headphone_bubble > 1 && connected) {
+        RectF rect = renderer->headphone_bubble;
+        double center_x = rect.X + headphone_bubble / 2;
+        double center_y = rect.Y + headphone_bubble / 2;
+        fill(renderer, rect, headphone_bubble / 2,
+             app->hover == ACTION_HEADPHONES ? COLOR_HOVER : COLOR_SURFACE);
+        if (renderer->border_width > 0)
+            outline(renderer, rect, headphone_bubble / 2, COLOR_BORDER, renderer->border_width);
+        double ring = fmax(12, headphone_bubble - 8);
+        headphone_ring(app, connected, center_x, center_y, ring, false);
+        earbuds(renderer, center_x, center_y, fmax(10, headphone_bubble * 0.46));
+        if (headphone_bubble > 20) {
+            wchar_t detail[160];
+            wchar_t label[360];
+            headphones_detail(connected, app->config.headphone_battery, detail, 160);
+            swprintf(label, 360, L"%ls. %ls. Open system controls.", connected->name, detail);
+            hit_add(app, rect, ACTION_HEADPHONES, true, label);
+        }
+    }
     renderer->opacity = 1;
     if (app->focus >= app->hit_count)
         app->focus = -1;
@@ -1250,6 +1276,10 @@ bool app_inside(const App *app, double x, double y) {
     if (island_contains(x - body.X, y - body.Y, body.Width, body.Height, renderer->radius))
         return true;
     RectF bubble = renderer->bubble;
-    return bubble.Width > 20 && island_contains(x - bubble.X, y - bubble.Y, bubble.Width,
-                                                bubble.Height, bubble.Width / 2);
+    RectF headphone = renderer->headphone_bubble;
+    return (bubble.Width > 20 && island_contains(x - bubble.X, y - bubble.Y, bubble.Width,
+                                                 bubble.Height, bubble.Width / 2)) ||
+           (headphone.Width > 20 &&
+            island_contains(x - headphone.X, y - headphone.Y, headphone.Width, headphone.Height,
+                            headphone.Width / 2));
 }

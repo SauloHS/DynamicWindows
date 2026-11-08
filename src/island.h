@@ -38,6 +38,7 @@ typedef struct {
     double height;
     double radius;
     double bubble;
+    double headphones;
 } IslandSize;
 
 #define ISLAND_MAX_TIMER_MS UINT64_C(86400000)

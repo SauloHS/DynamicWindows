@@ -226,12 +226,13 @@ IslandSize app_target_size(const App *app) {
     const AppConfig *config = &app->config;
     if (app->island.expanded)
         return (IslandSize){config->expanded_width, config->expanded_height,
-                            config->expanded_radius, 0};
+                            config->expanded_radius, 0, 0};
     if (app->island.alert == ALERT_HEADPHONES)
-        return (IslandSize){config->alert_width, config->alert_height, config->alert_height / 2, 0};
+        return (IslandSize){config->alert_width, config->alert_height, config->alert_height / 2, 0,
+                            0};
     if (app->island.alert != ALERT_NONE)
         return (IslandSize){config->alert_width, config->alert_height,
-                            fmin(config->alert_height / 2, config->compact_radius), 0};
+                            fmin(config->alert_height / 2, config->compact_radius), 0, 0};
     IslandActivity primary = app_primary(app);
     double width = primary == ACTIVITY_MEDIA   ? config->idle_width + config->media_extra_width
                    : primary == ACTIVITY_TIMER ? config->timer_width
@@ -239,10 +240,13 @@ IslandSize app_target_size(const App *app) {
     double bubble =
         config->dual_activity && app_secondary(app) != ACTIVITY_NONE ? config->bubble_size : 0;
     const HeadphoneDevice *headphones = app_headphones(app);
-    if (headphones)
+    if (headphones && primary == ACTIVITY_NONE)
         width += config->media_extra_width;
+    double headphone_bubble =
+        headphones && primary != ACTIVITY_NONE ? config->media_extra_width : 0;
     double height = primary == ACTIVITY_TIMER ? config->timer_height : config->compact_height;
-    return (IslandSize){width, height, fmin(config->compact_radius, height / 2), bubble};
+    return (IslandSize){width, height, fmin(config->compact_radius, height / 2), bubble,
+                        headphone_bubble};
 }
 
 static void frame_interval(App *app, unsigned milliseconds) {
@@ -544,6 +548,9 @@ void app_action(App *app, Action action, double value) {
         return;
     case ACTION_SECONDARY:
         app_open(app, app_secondary(app) == ACTIVITY_TIMER ? ISLAND_TIMER : ISLAND_MEDIA, true);
+        return;
+    case ACTION_HEADPHONES:
+        app_open(app, ISLAND_SYSTEM, true);
         return;
     case ACTION_CLOSE:
         app_close(app);
@@ -945,6 +952,8 @@ static void frame(App *app) {
                                   damping);
     moving |= island_spring_tuned(&app->bubble, size.bubble, seconds, app->reduced_motion, response,
                                   damping);
+    moving |= island_spring_tuned(&app->headphone_bubble, size.headphones, seconds,
+                                  app->reduced_motion, response, damping);
     moving |= island_spring_tuned(&app->reveal, app->island.expanded ? 1 : 0, seconds,
                                   app->reduced_motion, response, 100);
     double smooth = 1 - exp(-island_clamp(seconds, 0, 0.1) * 16);
@@ -1414,6 +1423,7 @@ static bool smoke_frame(App *app, const wchar_t *directory, const wchar_t *name)
     app->height = (IslandSpring){size.height, 0};
     app->radius = (IslandSpring){size.radius, 0};
     app->bubble = (IslandSpring){size.bubble, 0};
+    app->headphone_bubble = (IslandSpring){size.headphones, 0};
     if (!renderer_draw(app))
         return false;
     double x = app->renderer.body.X + app->renderer.body.Width / 2;
@@ -1450,7 +1460,6 @@ static int smoke_test(App *app, const wchar_t *directory) {
     app->config.headphone_status = false;
     passed &= smoke_frame(app, directory, L"headphones-status-disabled");
     app->config.headphone_status = true;
-    app->headphones.count = 0;
     island_open(&app->island, ISLAND_MEDIA);
     passed &= smoke_frame(app, directory, L"media-empty");
     app->media = (MediaSnapshot){.initialized = true,
@@ -1480,10 +1489,17 @@ static int smoke_test(App *app, const wchar_t *directory) {
     for (int i = 0; i < 10; ++i)
         app->peaks[i] = 0.03f + (float)(i % 4) * 0.06f;
     island_close(&app->island);
-    passed &= smoke_frame(app, directory, L"media-compact");
+    IslandSize media_headphones = app_target_size(app);
+    passed &= media_headphones.width == app->config.idle_width + app->config.media_extra_width;
+    passed &= media_headphones.bubble == 0;
+    passed &= media_headphones.headphones == app->config.media_extra_width;
+    passed &= smoke_frame(app, directory, L"media-compact-headphones");
     passed &= island_timer_start(&app->island, 300000, GetTickCount64());
     app->island.preferred = ACTIVITY_MEDIA;
-    passed &= smoke_frame(app, directory, L"dual-activity");
+    IslandSize dual_headphones = app_target_size(app);
+    passed &= dual_headphones.bubble == app->config.bubble_size;
+    passed &= dual_headphones.headphones == app->config.media_extra_width;
+    passed &= smoke_frame(app, directory, L"dual-activity-headphones");
     island_open(&app->island, ISLAND_MEDIA);
     passed &= smoke_frame(app, directory, L"media-expanded");
     app->island.timer.remaining = 187000;
@@ -1604,6 +1620,8 @@ static bool create_app(App *app, const Options *options) {
     app->width.value = size.width;
     app->height.value = size.height;
     app->radius.value = size.radius;
+    app->bubble.value = size.bubble;
+    app->headphone_bubble.value = size.headphones;
     app->visibility.value = 1;
     app->icon = renderer_icon(app);
     SendMessageW(app->window, WM_SETICON, ICON_SMALL, (LPARAM)app->icon);

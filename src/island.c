@@ -109,14 +109,14 @@ IslandActivity island_secondary(const Island *island) {
 
 IslandSize island_size(const Island *island) {
     if (island->expanded)
-        return (IslandSize){408, 264, 30, 0};
+        return (IslandSize){408, 264, 30, 0, 0};
     if (island->alert != ALERT_NONE) {
         double height = island->alert == ALERT_TIMER ? 76 : 68;
-        return (IslandSize){312, height, height / 2, 0};
+        return (IslandSize){312, height, height / 2, 0, 0};
     }
     IslandActivity primary = island_primary(island);
     double width = primary == ACTIVITY_MEDIA ? 232 : primary == ACTIVITY_TIMER ? 196 : 168;
-    return (IslandSize){width, 44, 22, island_secondary(island) != ACTIVITY_NONE ? 44 : 0};
+    return (IslandSize){width, 44, 22, island_secondary(island) != ACTIVITY_NONE ? 44 : 0, 0};
 }
 
 double island_timer_progress(const Island *island) {

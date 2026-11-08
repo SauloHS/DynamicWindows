@@ -93,7 +93,7 @@ Full-screen suppression takes priority. Clicking a temporary preview explicitly 
 
 ### Headphones and Bluetooth
 
-Connecting headphones shows an original earbud illustration, a small connection label above the device name, and a circular Bluetooth battery meter. After the preview, the compact pill keeps the earbud icon on the left and the battery ring on the right. During media or timer activity, headphone status shares the pill without hiding those controls and uses the configured **Media preview extra width**.
+Connecting headphones shows an original earbud illustration, a small connection label above the device name, and a circular Bluetooth battery meter. After the preview, the compact idle pill keeps the earbud icon and battery ring. When media or a timer is active, that activity keeps the main pill and earbuds move into a circular side bubble sized by **Media preview extra width**. Media and timers always outrank earbuds.
 
 Bluetooth audio includes a percentage only when its Windows driver publishes one. Missing battery data uses a neutral ring and `?` in the larger preview, never a fabricated zero. Windows can expose some Bluetooth speakers through the same audio endpoint path. The earbud SVG is original artwork embedded in the executable, not an Apple asset.
 

@@ -37,6 +37,7 @@ typedef enum {
     ACTION_NONE,
     ACTION_EXPAND,
     ACTION_SECONDARY,
+    ACTION_HEADPHONES,
     ACTION_CLOSE,
     ACTION_TAB_MEDIA,
     ACTION_TAB_TIMER,
@@ -102,6 +103,7 @@ typedef struct {
     double canvas_height;
     RectF body;
     RectF bubble;
+    RectF headphone_bubble;
     double radius;
     bool panel_layout;
     double panel_scale;
@@ -154,6 +156,7 @@ typedef struct App {
     IslandSpring height;
     IslandSpring radius;
     IslandSpring bubble;
+    IslandSpring headphone_bubble;
     IslandSpring reveal;
     IslandSpring visibility;
     IslandSpring media_peek;

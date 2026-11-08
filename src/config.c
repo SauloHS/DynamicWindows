@@ -474,12 +474,11 @@ bool config_save(const AppConfig *input, const wchar_t *path) {
 double config_reference_width(const AppConfig *config) {
     double media = fmax(config->media_width, config->idle_width + config->media_extra_width);
     double compact = fmax(config->idle_width, fmax(media, config->timer_width));
-    if (config->headphone_status)
-        compact = fmax(compact,
-                       fmax(config->idle_width + config->media_extra_width, config->timer_width) +
-                           config->media_extra_width);
-    return fmax(config->expanded_width,
-                fmax(compact + config->bubble_gap + config->bubble_size, config->alert_width));
+    double side = config->bubble_gap + config->bubble_size;
+    double headphones = config->headphone_status && config->media_extra_width > 0
+                            ? config->bubble_gap + config->media_extra_width
+                            : 0;
+    return fmax(config->expanded_width, fmax(compact + side + headphones, config->alert_width));
 }
 
 void config_canvas(const AppConfig *config, double *width, double *height) {

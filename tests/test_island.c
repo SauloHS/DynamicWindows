@@ -117,6 +117,7 @@ static void test_activities(void) {
     CHECK(island_primary(&island) == ACTIVITY_TIMER);
     CHECK(island_secondary(&island) == ACTIVITY_MEDIA);
     CHECK(island_size(&island).bubble == 44);
+    CHECK(island_size(&island).headphones == 0);
     island_open(&island, ISLAND_MEDIA);
     CHECK(island.expanded);
     CHECK(island.view == ISLAND_MEDIA);
