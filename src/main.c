@@ -255,9 +255,8 @@ IslandSize app_target_size(const App *app) {
     const HeadphoneDevice *headphones = app_headphones(app);
     if (headphones && primary == ACTIVITY_NONE)
         width += config->media_extra_width;
-    double headphone_bubble =
-        headphones && primary != ACTIVITY_NONE ? config->media_extra_width : 0;
     double height = primary == ACTIVITY_TIMER ? config->timer_height : config->compact_height;
+    double headphone_bubble = headphones && primary != ACTIVITY_NONE ? height : 0;
     return (IslandSize){width, height, fmin(config->compact_radius, height / 2), bubble,
                         headphone_bubble};
 }
@@ -1563,13 +1562,13 @@ static int smoke_test(App *app, const wchar_t *directory) {
     IslandSize media_headphones = app_target_size(app);
     passed &= media_headphones.width == app->config.idle_width + app->config.media_extra_width;
     passed &= media_headphones.bubble == 0;
-    passed &= media_headphones.headphones == app->config.media_extra_width;
+    passed &= media_headphones.headphones == media_headphones.height;
     passed &= smoke_frame(app, directory, L"media-compact-headphones");
     passed &= island_timer_start(&app->island, 300000, GetTickCount64());
     app->island.preferred = ACTIVITY_MEDIA;
     IslandSize dual_headphones = app_target_size(app);
     passed &= dual_headphones.bubble == app->config.bubble_size;
-    passed &= dual_headphones.headphones == app->config.media_extra_width;
+    passed &= dual_headphones.headphones == dual_headphones.height;
     passed &= smoke_frame(app, directory, L"dual-activity-headphones");
     island_open(&app->island, ISLAND_MEDIA);
     passed &= smoke_frame(app, directory, L"media-expanded");

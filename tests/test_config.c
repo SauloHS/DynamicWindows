@@ -112,6 +112,8 @@ static void test_placement(void) {
     config_canvas(&config, &width, &height);
     CHECK(width > 1200);
     CHECK(config_reference_width(&config) == 1113);
+    config.timer_height = 120;
+    CHECK(config_reference_width(&config) == 1160);
 }
 
 static void test_persistence(void) {

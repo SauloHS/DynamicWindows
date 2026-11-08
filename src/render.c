@@ -1184,7 +1184,8 @@ bool renderer_draw(App *app) {
     double height = island_clamp(app->height.value, 20, app->canvas_height - 20);
     double bubble = island_clamp(app->bubble.value, 0, app->config.bubble_size * 1.12);
     double headphone_bubble =
-        island_clamp(app->headphone_bubble.value, 0, app->config.media_extra_width * 1.12);
+        island_clamp(app->headphone_bubble.value, 0,
+                     fmax(app->config.compact_height, app->config.timer_height) * 1.12);
     double gap = bubble > 0.5 ? app->config.bubble_gap : 0;
     double headphone_gap = headphone_bubble > 0.5 ? app->config.bubble_gap : 0;
     double total = width + (bubble > 0.5 ? bubble + gap : 0) +
@@ -1288,8 +1289,9 @@ bool renderer_draw(App *app) {
                     secondary == ACTIVITY_TIMER ? L"Expand countdown timer"
                                                 : L"Expand media controls");
     }
-    renderer->opacity =
-        island_clamp(headphone_bubble / fmax(1, app->config.media_extra_width), 0, 1);
+    renderer->opacity = island_clamp(
+        headphone_bubble / fmax(1, fmax(app->config.compact_height, app->config.timer_height)), 0,
+        1);
     const HeadphoneDevice *connected = app_headphones(app);
     if (headphone_bubble > 1 && connected) {
         RectF rect = renderer->headphone_bubble;
