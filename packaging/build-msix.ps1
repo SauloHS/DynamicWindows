@@ -31,6 +31,19 @@ $assets = Join-Path $stage "Assets"
 New-Item -ItemType Directory -Force -Path $assets | Out-Null
 Copy-Item -LiteralPath $executable -Destination (Join-Path $stage "DynamicWindows.exe")
 Copy-Item -LiteralPath (Join-Path $root "LICENSE") -Destination (Join-Path $stage "LICENSE.txt")
+$speech = Join-Path (Split-Path -Parent $executable) "speech"
+if (Test-Path -LiteralPath $speech -PathType Container) {
+    $speechStage = Join-Path $stage "speech"
+    New-Item -ItemType Directory -Force -Path $speechStage | Out-Null
+    foreach ($name in @("whisper.dll", "ggml.dll", "ggml-base.dll", "ggml-cpu.dll",
+            "ggml-tiny.bin", "whisper-LICENSE.txt", "whisper-model-LICENSE.txt")) {
+        $source = Join-Path $speech $name
+        if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            throw "Speech runtime is incomplete: $source. Run packaging/setup-speech.ps1 first."
+        }
+        Copy-Item -LiteralPath $source -Destination (Join-Path $speechStage $name)
+    }
+}
 
 $manifest = [System.IO.File]::ReadAllText($manifestTemplate)
 $manifest = $manifest.Replace('Publisher="CN=DynamicWindows Development"', "Publisher=`"$Publisher`"")

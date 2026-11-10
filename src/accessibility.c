@@ -126,13 +126,32 @@ static HRESULT STDMETHODCALLTYPE accessible_child(IAccessible *client, VARIANT c
     return child_index(object(client), child) < -1 ? E_INVALIDARG : S_FALSE;
 }
 
+static bool selected_tab(const App *app, Action action) {
+    return (app->island.view <= ISLAND_SYSTEM &&
+            action == (Action)(ACTION_TAB_MEDIA + (int)app->island.view)) ||
+           (app->island.view == ISLAND_NOTIFICATIONS && action == ACTION_TAB_NOTIFICATIONS) ||
+           (app->island.view == ISLAND_CRAB && action == ACTION_TAB_CRAB);
+}
+
 static HRESULT STDMETHODCALLTYPE accessible_name(IAccessible *client, VARIANT child, BSTR *result) {
     Accessible *accessible = object(client);
     int index = child_index(accessible, child);
     if (index < -1)
         return string_result(result, NULL) == E_POINTER ? E_POINTER : E_INVALIDARG;
-    if (index >= 0)
-        return string_result(result, accessible->app->hits[index].label);
+    if (index >= 0) {
+        const UiHit *hit = &accessible->app->hits[index];
+        if (hit->action == ACTION_CRAB_MESSAGE &&
+            hit->chat_turn < accessible->app->crab_conversation.count) {
+            const CrabTurn *turn = &accessible->app->crab_conversation.turns[hit->chat_turn];
+            const wchar_t *message = hit->chat_user ? turn->transcript : crab_turn_reply(turn);
+            wchar_t label[2200];
+            swprintf(label, 2200, L"%ls: %ls",
+                     hit->chat_user ? L"You, recognized speech" : accessible->app->config.crab_name,
+                     message);
+            return string_result(result, label);
+        }
+        return string_result(result, hit->label);
+    }
     wchar_t summary[600];
     app_summary(accessible->app, summary, 600);
     return string_result(result, summary);
@@ -185,9 +204,10 @@ static HRESULT STDMETHODCALLTYPE accessible_role(IAccessible *client, VARIANT ch
     if (index < 0)
         return S_OK;
     Action action = accessible->app->hits[index].action;
-    result->lVal = action == ACTION_VOLUME || action == ACTION_SEEK ? ROLE_SYSTEM_SLIDER
+    result->lVal = action == ACTION_CRAB_MESSAGE                      ? ROLE_SYSTEM_TEXT
+                   : action == ACTION_VOLUME || action == ACTION_SEEK ? ROLE_SYSTEM_SLIDER
                    : (action >= ACTION_TAB_MEDIA && action <= ACTION_TAB_SYSTEM) ||
-                           action == ACTION_TAB_NOTIFICATIONS
+                           action == ACTION_TAB_NOTIFICATIONS || action == ACTION_TAB_CRAB
                        ? ROLE_SYSTEM_PAGETAB
                        : ROLE_SYSTEM_PUSHBUTTON;
     return S_OK;
@@ -216,9 +236,11 @@ static HRESULT STDMETHODCALLTYPE accessible_state(IAccessible *client, VARIANT c
     UiHit *hit = &app->hits[index];
     if (!hit->enabled)
         result->lVal |= STATE_SYSTEM_UNAVAILABLE;
+    if (hit->action == ACTION_CRAB_MESSAGE)
+        result->lVal |= STATE_SYSTEM_READONLY;
     if (app->focus == index && GetForegroundWindow() == app->window)
         result->lVal |= STATE_SYSTEM_FOCUSED;
-    if ((int)hit->action == ACTION_TAB_MEDIA + (int)app->island.view)
+    if (selected_tab(app, hit->action))
         result->lVal |= STATE_SYSTEM_SELECTED;
     if (app->pressed == hit->action)
         result->lVal |= STATE_SYSTEM_PRESSED;
@@ -274,7 +296,7 @@ static HRESULT STDMETHODCALLTYPE accessible_selection(IAccessible *client, VARIA
     if (!app)
         return CO_E_OBJNOTCONNECTED;
     for (int i = 0; i < app->hit_count; ++i)
-        if ((int)app->hits[i].action == ACTION_TAB_MEDIA + (int)app->island.view) {
+        if (selected_tab(app, app->hits[i].action)) {
             result->vt = VT_I4;
             result->lVal = i + 1;
             return S_OK;
@@ -291,6 +313,8 @@ static HRESULT STDMETHODCALLTYPE accessible_default(IAccessible *client, VARIANT
     if (index < 0)
         return string_result(result, L"Expand");
     Action action = accessible->app->hits[index].action;
+    if (action == ACTION_CRAB_MESSAGE)
+        return string_result(result, NULL);
     return string_result(result,
                          action == ACTION_VOLUME || action == ACTION_SEEK ? L"Adjust" : L"Press");
 }
@@ -380,7 +404,7 @@ static HRESULT STDMETHODCALLTYPE accessible_do_action(IAccessible *client, VARIA
     if (index >= 0 && !app->hits[index].enabled)
         return E_ACCESSDENIED;
     Action action = index < 0 ? ACTION_EXPAND : app->hits[index].action;
-    if (action == ACTION_VOLUME || action == ACTION_SEEK)
+    if (action == ACTION_VOLUME || action == ACTION_SEEK || action == ACTION_CRAB_MESSAGE)
         return S_FALSE;
     PostMessageW(app->window, WM_DYNAMICWINDOWS_ACCESS, action, 0);
     return S_OK;

@@ -10,7 +10,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(APP_SOURCES src/main.c src/render.c src/platform.c src/media.c src/accessibility.c src/config.c src/settings.c src/headphones.c src/notifications.c src/crab.c)
+set(APP_SOURCES src/main.c src/render.c src/platform.c src/media.c src/accessibility.c src/config.c src/settings.c src/headphones.c src/notifications.c src/crab.c src/speech.c)
 set(CHECK_SOURCES ${APP_SOURCES} src/island.c tests/test_island.c tests/test_config.c tests/media_publisher.c tests/test_headphones.c tests/test_notifications.c tests/test_crab.c)
 set(CHECK_FLAGS -Wall -Wextra -Wpedantic -Werror -Wshadow -Wstrict-prototypes -Wmissing-prototypes)
 set(APP_DEFINES UNICODE _UNICODE COBJMACROS WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
@@ -55,13 +55,12 @@ if(BUILD_TESTING)
     target_link_options(notification_tests PRIVATE -static -static-libgcc)
     target_link_libraries(notification_tests PRIVATE ole32 runtimeobject user32)
     add_test(NAME notifications COMMAND notification_tests)
-    add_executable(crab_tests tests/test_crab.c src/crab.c)
+    add_executable(crab_tests tests/test_crab.c src/crab.c src/speech.c)
     target_include_directories(crab_tests PRIVATE src)
     target_compile_definitions(crab_tests PRIVATE ${APP_DEFINES})
     target_compile_options(crab_tests PRIVATE ${CHECK_FLAGS})
     target_link_options(crab_tests PRIVATE -static -static-libgcc)
-    target_link_libraries(crab_tests PRIVATE ole32 uuid user32 advapi32 winhttp credui sapi
-                                             runtimeobject)
+    target_link_libraries(crab_tests PRIVATE ole32 uuid user32 advapi32 winhttp credui sapi)
     add_test(NAME crab COMMAND crab_tests)
     add_executable(media_publisher tests/media_publisher.c)
     target_compile_definitions(media_publisher PRIVATE ${APP_DEFINES})
@@ -89,3 +88,10 @@ add_custom_target(lint
 
 install(TARGETS dynamicwindows RUNTIME DESTINATION .)
 install(FILES README.md LICENSE resources/defaults.ini DESTINATION .)
+install(FILES "${CMAKE_BINARY_DIR}/speech/whisper.dll"
+              "${CMAKE_BINARY_DIR}/speech/ggml.dll"
+              "${CMAKE_BINARY_DIR}/speech/ggml-base.dll"
+              "${CMAKE_BINARY_DIR}/speech/ggml-cpu.dll"
+              "${CMAKE_BINARY_DIR}/speech/ggml-tiny.bin"
+              resources/whisper-LICENSE.txt resources/whisper-model-LICENSE.txt
+        DESTINATION speech OPTIONAL)

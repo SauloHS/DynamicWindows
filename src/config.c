@@ -95,6 +95,7 @@ void config_defaults(AppConfig *config) {
     wcscpy(config->idle_text, L"DynamicWindows");
     wcscpy(config->idle_font, L"Segoe UI");
     wcscpy(config->crab_name, L"Crab");
+    wcscpy(config->crab_speech_model, L"speech\\ggml-tiny.bin");
 }
 
 static void trim_text(wchar_t *text) {
@@ -122,12 +123,14 @@ void config_normalize(AppConfig *config) {
     config->crab_name[63] = L'\0';
     config->crab_base_url[511] = L'\0';
     config->crab_model[95] = L'\0';
+    config->crab_speech_model[511] = L'\0';
     config->monitor[31] = L'\0';
     if (!*config->idle_font)
         wcscpy(config->idle_font, L"Segoe UI");
     trim_text(config->crab_name);
     trim_text(config->crab_base_url);
     trim_text(config->crab_model);
+    trim_text(config->crab_speech_model);
     if (!*config->crab_name)
         wcscpy(config->crab_name, L"Crab");
     if (config->crab_provider == CRAB_PROVIDER_ANTHROPIC && !*config->crab_base_url)
@@ -445,6 +448,8 @@ bool config_load(AppConfig *config, const wchar_t *path) {
                              config->crab_base_url, 512, path);
     GetPrivateProfileStringW(section, L"crab_model", config->crab_model, config->crab_model, 96,
                              path);
+    GetPrivateProfileStringW(section, L"crab_speech_model", config->crab_speech_model,
+                             config->crab_speech_model, 512, path);
     if (!crab_provider_present && *config->crab_model) {
         config->crab_provider = CRAB_PROVIDER_ANTHROPIC;
         if (!*config->crab_base_url)
@@ -540,6 +545,9 @@ bool config_save(const AppConfig *input, const wchar_t *path) {
                                        temporary) &&
             saved;
     saved = WritePrivateProfileStringW(INI_SECTION, L"crab_model", config.crab_model, temporary) &&
+            saved;
+    saved = WritePrivateProfileStringW(INI_SECTION, L"crab_speech_model", config.crab_speech_model,
+                                       temporary) &&
             saved;
     for (int i = 0; i < TINT_COUNT; ++i) {
         wchar_t key[32];

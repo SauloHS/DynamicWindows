@@ -26,12 +26,14 @@
 #define MENU_SETTINGS 110
 #define MENU_ABOUT 111
 #define MENU_CRAB 112
+#define MENU_CRAB_HISTORY 113
 #define MENU_MONITOR_BASE 200
 
 static const wchar_t window_class[] = L"DynamicWindows.ActivityIsland";
 
 static void toggle_visibility(App *app);
 static void shortcut_action(App *app, ShortcutAction shortcut);
+static void tooltip_hide(App *app);
 static App *hook_app;
 
 typedef struct {
@@ -86,6 +88,14 @@ void app_crab_error_text(HRESULT error, wchar_t *text, size_t count) {
     swprintf(text, count, L"%ls (0x%08lX)", cause, (unsigned long)error);
 }
 
+void app_crab_error_detail(const App *app, wchar_t *text, size_t count) {
+    if (*app->crab_answer) {
+        swprintf(text, count, L"%ls", app->crab_answer);
+        return;
+    }
+    app_crab_error_cause(app->crab_error, text, count);
+}
+
 void app_clock(uint64_t milliseconds, wchar_t *text, size_t count) {
     uint64_t seconds = milliseconds / 1000 + (milliseconds % 1000 != 0);
     unsigned long long hours = seconds / 3600;
@@ -98,10 +108,12 @@ void app_clock(uint64_t milliseconds, wchar_t *text, size_t count) {
 }
 
 void app_summary(const App *app, wchar_t *text, size_t count) {
-    if (app->crab_state == CRAB_ERROR) {
+    if (app->crab_state == CRAB_ERROR &&
+        !(app->island.expanded && app->island.view == ISLAND_CRAB)) {
         wchar_t error[160];
-        app_crab_error_text(app->crab_error, error, 160);
-        swprintf(text, count, L"DynamicWindows. %ls error. %ls.", app->config.crab_name, error);
+        app_crab_error_detail(app, error, 160);
+        swprintf(text, count, L"DynamicWindows. %ls error. %ls (0x%08lX).", app->config.crab_name,
+                 error, (unsigned long)app->crab_error);
         return;
     }
     if (app->crab_state == CRAB_LISTENING || app->crab_state == CRAB_THINKING ||
@@ -143,6 +155,18 @@ void app_summary(const App *app, wchar_t *text, size_t count) {
                      : app->island.timer.paused  ? L"Paused"
                      : app->island.timer.running ? L"Running"
                                                  : L"Ready");
+        } else if (app->island.view == ISLAND_CRAB) {
+            if (app->crab_state == CRAB_ERROR) {
+                wchar_t error[160];
+                app_crab_error_detail(app, error, 160);
+                swprintf(text, count, L"DynamicWindows. %ls conversation. %u exchanges. %ls.",
+                         app->config.crab_name, app->crab_conversation.count, error);
+                return;
+            }
+            swprintf(text, count,
+                     L"DynamicWindows. %ls conversation. %u exchanges. "
+                     L"Scroll to read what was heard and the replies.",
+                     app->config.crab_name, app->crab_conversation.count);
         } else if (app->island.view == ISLAND_NOTIFICATIONS) {
             swprintf(text, count, L"DynamicWindows. Notifications. %u captured. Expanded.",
                      app->notification_count);
@@ -284,7 +308,7 @@ IslandSize app_target_size(const App *app) {
                     app->crab_state == CRAB_SPEAKING || GetTickCount64() < app->crab_orb_until;
     if (crab_orb)
         return (IslandSize){72, 72, 36, 0, 0};
-    if (app->crab_state == CRAB_ERROR)
+    if (app->crab_state == CRAB_ERROR && !(app->island.expanded && app->island.view == ISLAND_CRAB))
         return (IslandSize){config->alert_width, config->alert_height, config->alert_height / 2, 0,
                             0};
     if (app->island.expanded)
@@ -422,6 +446,42 @@ void app_media_name(const App *app, wchar_t *text, size_t count) {
     }
 }
 
+static void crab_clear_history(App *app) {
+    crab_cancel(&app->crab_service);
+    crab_clear_context(&app->crab_service);
+    crab_conversation_clear(&app->crab_conversation);
+    SecureZeroMemory(app->crab_transcript, sizeof(app->crab_transcript));
+    SecureZeroMemory(app->crab_answer, sizeof(app->crab_answer));
+    tooltip_hide(app);
+    SecureZeroMemory(app->tooltip_text, sizeof(app->tooltip_text));
+    if (app->tooltip) {
+        TOOLINFOW tool = {
+            .cbSize = sizeof(tool), .hwnd = app->window, .uId = 1, .lpszText = app->tooltip_text};
+        SendMessageW(app->tooltip, TTM_UPDATETIPTEXTW, 0, (LPARAM)&tool);
+    }
+    SecureZeroMemory(app->hits, sizeof(app->hits));
+    app->hit_count = 0;
+    app->focus = -1;
+    app->hover = ACTION_NONE;
+    app->crab_scroll = 0;
+    app->crab_scroll_max = 0;
+    app->crab_follow_latest = true;
+    app->crab_state = app->config.crab_enabled ? CRAB_IDLE : CRAB_DISABLED;
+    app->crab_error = S_OK;
+    app->crab_orb_until = 0;
+    app->event_until = 0;
+}
+
+static void crab_scroll(App *app, double delta) {
+    app->crab_scroll = island_clamp(app->crab_scroll + delta, 0, app->crab_scroll_max);
+    app->crab_follow_latest = app->crab_scroll >= app->crab_scroll_max;
+    app->focus = -1;
+    app->hover = ACTION_NONE;
+    tooltip_hide(app);
+    app_animate(app);
+    app_render(app);
+}
+
 bool app_apply_config(App *app, const AppConfig *input, bool persist) {
     AppConfig config = *input;
     AppConfig previous = app->config;
@@ -448,8 +508,14 @@ bool app_apply_config(App *app, const AppConfig *input, bool persist) {
     }
     app->hover_enabled = config.hover_expand;
     app->quiet_fullscreen = config.hide_fullscreen;
+    bool crab_provider_changed = previous.crab_provider != config.crab_provider ||
+                                 wcscmp(previous.crab_base_url, config.crab_base_url) != 0 ||
+                                 wcscmp(previous.crab_model, config.crab_model) != 0;
+    if (crab_provider_changed || !config.crab_enabled)
+        crab_clear_history(app);
     crab_configure(&app->crab_service, config.crab_enabled, config.crab_speak, config.crab_provider,
-                   config.crab_name, config.crab_base_url, config.crab_model);
+                   config.crab_name, config.crab_base_url, config.crab_model,
+                   config.crab_speech_model);
     notifications_configure(&app->notification_service, app->window, config.notifications_enabled,
                             config.notification_content);
     app->motion_allowed = !config.reduced_motion;
@@ -566,6 +632,10 @@ void app_open(App *app, IslandView view, bool activate) {
     app->fullscreen_hidden = false;
     if (activate && GetForegroundWindow() != app->window)
         app->previous_foreground = GetForegroundWindow();
+    if (view != ISLAND_CRAB && app->crab_state == CRAB_ERROR) {
+        app->crab_state = app->config.crab_enabled ? CRAB_IDLE : CRAB_DISABLED;
+        app->crab_orb_until = 0;
+    }
     island_open(&app->island, view);
     app->hover_open = !activate;
     app->focus = -1;
@@ -587,11 +657,16 @@ void app_close(App *app) {
         app->crab_state == CRAB_SPEAKING) {
         crab_cancel(&app->crab_service);
         app->crab_state = CRAB_IDLE;
+        crab_conversation_cancel(&app->crab_conversation);
         app->event_until = GetTickCount64() + 1200;
         app_animate(app);
         return;
     }
     outside_tracking(app, false);
+    if (app->island.view == ISLAND_CRAB && app->crab_state == CRAB_ERROR) {
+        app->crab_state = app->config.crab_enabled ? CRAB_IDLE : CRAB_DISABLED;
+        app->crab_orb_until = 0;
+    }
     island_close(&app->island);
     app->hover_open = false;
     app->hover_blocked = true;
@@ -728,11 +803,24 @@ void app_action(App *app, Action action, double value) {
         if (app->notification_index > 0)
             --app->notification_index;
         break;
+    case ACTION_CRAB_SCROLL_UP:
+        crab_scroll(app, -96);
+        return;
+    case ACTION_CRAB_SCROLL_DOWN:
+        crab_scroll(app, 96);
+        return;
+    case ACTION_CRAB_CLEAR:
+        crab_clear_history(app);
+        break;
+    case ACTION_TAB_CRAB:
+        app_open(app, ISLAND_CRAB, true);
+        return;
     case ACTION_CRAB:
         if (app->crab_state == CRAB_LISTENING || app->crab_state == CRAB_THINKING ||
             app->crab_state == CRAB_SPEAKING) {
             crab_cancel(&app->crab_service);
             app->crab_state = CRAB_IDLE;
+            crab_conversation_cancel(&app->crab_conversation);
             app->event_until = GetTickCount64() + 1200;
             app_animate(app);
             return;
@@ -765,16 +853,18 @@ void app_action(App *app, Action action, double value) {
         app->crab_error = S_OK;
         app->crab_transcript[0] = L'\0';
         app->crab_answer[0] = L'\0';
-        if (!crab_listen(&app->crab_service)) {
+        if (!crab_listen(&app->crab_service, &app->crab_conversation)) {
             app->crab_state = CRAB_ERROR;
             app->crab_error = HRESULT_FROM_WIN32(ERROR_BUSY);
             app->event_until = GetTickCount64() + 3000;
             app_animate(app);
             return;
         }
-        app->crab_state = CRAB_LISTENING;
+        app->crab_follow_latest = true;
+        app->crab_state = CRAB_THINKING;
         app_animate(app);
         return;
+    case ACTION_CRAB_MESSAGE:
     case ACTION_TRACK_INFO:
         return;
     case ACTION_NONE:
@@ -830,6 +920,7 @@ static void tray_menu(App *app) {
                         app->crab_state == CRAB_SPEAKING
                     ? L"Cancel Crab"
                     : L"Start Crab");
+    AppendMenuW(menu, MF_STRING, MENU_CRAB_HISTORY, L"Crab conversation");
     AppendMenuW(menu, MF_SEPARATOR, 0, NULL);
     MonitorMenu state = {.app = app, .menu = displays, .target = UINT_MAX};
     EnumDisplayMonitors(NULL, NULL, monitor_menu, (LPARAM)&state);
@@ -875,6 +966,9 @@ static void tray_menu(App *app) {
         break;
     case MENU_SEARCH:
         app_action(app, ACTION_SEARCH, 0);
+        break;
+    case MENU_CRAB_HISTORY:
+        app_open(app, ISLAND_CRAB, true);
         break;
     case MENU_CRAB:
         app_action(app, ACTION_CRAB, 0);
@@ -1011,13 +1105,20 @@ static void pointer_state(App *app, uint64_t now) {
 static void crab_receive(App *app, CrabMessage *message) {
     if (!message)
         return;
+    if (!crab_message_current(&app->crab_service, message)) {
+        crab_message_free(message);
+        return;
+    }
+    bool conversation_changed = crab_conversation_receive(&app->crab_conversation, message);
+    bool show_conversation = app->crab_conversation.count &&
+                             (message->state == CRAB_IDLE || message->state == CRAB_ERROR);
     app->crab_state = message->state;
     app->crab_error = message->error;
     if (*message->transcript)
         wcsncpy(app->crab_transcript, message->transcript, 767);
-    if (*message->answer)
+    if (message->state == CRAB_LISTENING || message->state == CRAB_ERROR || *message->answer)
         wcsncpy(app->crab_answer, message->answer, 2047);
-    free(message);
+    crab_message_free(message);
     if (app->crab_state == CRAB_ERROR) {
         app->crab_orb_until = GetTickCount64() + 700;
         app->event_until = GetTickCount64() + 5000;
@@ -1027,6 +1128,17 @@ static void crab_receive(App *app, CrabMessage *message) {
     } else {
         app->event_until = UINT64_MAX;
     }
+    if (show_conversation) {
+        island_open(&app->island, ISLAND_CRAB);
+        app->hover_open = false;
+        app->hover_blocked = true;
+        app->focus = -1;
+        app->crab_follow_latest = true;
+        app->event_until = GetTickCount64() + 10000;
+        outside_tracking(app, true);
+    }
+    if (conversation_changed)
+        NotifyWinEvent(EVENT_OBJECT_REORDER, app->window, OBJID_CLIENT, CHILDID_SELF);
     NotifyWinEvent(EVENT_OBJECT_NAMECHANGE, app->window, OBJID_CLIENT, CHILDID_SELF);
     app_animate(app);
     app_render(app);
@@ -1304,6 +1416,17 @@ static void key_action(App *app, WPARAM key) {
             app_action(app, hit.action, 0);
         return;
     }
+    if (app->island.expanded && app->island.view == ISLAND_CRAB &&
+        (key == VK_UP || key == VK_DOWN || key == VK_PRIOR || key == VK_NEXT || key == VK_HOME ||
+         key == VK_END)) {
+        double delta = key == VK_UP ? -32 : key == VK_DOWN ? 32 : key == VK_PRIOR ? -128 : 128;
+        if (key == VK_HOME || key == VK_END) {
+            app->crab_scroll = key == VK_HOME ? 0 : app->crab_scroll_max;
+            delta = 0;
+        }
+        crab_scroll(app, delta);
+        return;
+    }
     unsigned modifiers = shortcut_modifiers();
     for (int i = SHORTCUT_GLOBAL_COUNT; i < SHORTCUT_COUNT; ++i) {
         ShortcutBinding binding = app->config.shortcuts[i];
@@ -1429,7 +1552,7 @@ static void shutdown_app(App *app) {
     MSG message;
     while (PeekMessageW(&message, app->window, WM_DYNAMICWINDOWS_CRAB, WM_DYNAMICWINDOWS_CRAB,
                         PM_REMOVE))
-        free((CrabMessage *)message.lParam);
+        crab_message_free((CrabMessage *)message.lParam);
     while (PeekMessageW(&message, app->window, WM_DYNAMICWINDOWS_NOTIFICATION,
                         WM_DYNAMICWINDOWS_NOTIFICATION, PM_REMOVE))
         free((NotificationMessage *)message.lParam);
@@ -1451,6 +1574,9 @@ static void shutdown_app(App *app) {
         Shell_NotifyIconW(NIM_DELETE, &app->tray);
     if (app->tooltip)
         DestroyWindow(app->tooltip);
+    crab_conversation_clear(&app->crab_conversation);
+    SecureZeroMemory(app->crab_transcript, sizeof(app->crab_transcript));
+    SecureZeroMemory(app->crab_answer, sizeof(app->crab_answer));
     renderer_destroy(&app->renderer);
     if (app->icon)
         DestroyIcon(app->icon);
@@ -1482,7 +1608,9 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LP
     case WM_MOUSEACTIVATE:
         return MA_NOACTIVATE;
     case WM_SETCURSOR:
-        SetCursor(LoadCursorW(NULL, app->hover != ACTION_NONE ? IDC_HAND : IDC_ARROW));
+        SetCursor(LoadCursorW(NULL, app->hover != ACTION_NONE && app->hover != ACTION_CRAB_MESSAGE
+                                        ? IDC_HAND
+                                        : IDC_ARROW));
         return TRUE;
     case WM_LBUTTONDOWN:
         mouse_down(app, lparam);
@@ -1513,6 +1641,10 @@ static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LP
         app->pressed = ACTION_NONE;
         return 0;
     case WM_MOUSEWHEEL:
+        if (app->island.expanded && app->island.view == ISLAND_CRAB) {
+            crab_scroll(app, -(double)GET_WHEEL_DELTA_WPARAM(wparam) / WHEEL_DELTA * 72);
+            return 0;
+        }
         if (app->system.audio_available) {
             double delta =
                 (double)GET_WHEEL_DELTA_WPARAM(wparam) / WHEEL_DELTA * app->config.wheel_step / 100;
@@ -1637,6 +1769,8 @@ static bool parse_options(Options *options) {
                 options->view = ISLAND_SYSTEM;
             else if (wcscmp(view, L"media") == 0)
                 options->view = ISLAND_MEDIA;
+            else if (wcscmp(view, L"crab") == 0)
+                options->view = ISLAND_CRAB;
             else
                 valid = false;
         } else if (wcscmp(arguments[i], L"--run-for") == 0 && i + 1 < count) {
@@ -1715,6 +1849,46 @@ static int smoke_test(App *app, const wchar_t *directory) {
     passed &= crab_error_size.width == app->config.alert_width;
     passed &= crab_error_size.height == app->config.alert_height;
     passed &= smoke_frame(app, directory, L"crab-error-text");
+    app->crab_state = CRAB_IDLE;
+    island_open(&app->island, ISLAND_CRAB);
+    passed &= smoke_frame(app, directory, L"crab-chat-empty");
+    CrabMessage chat_message = {.state = CRAB_THINKING, .transcript = L"How much is one plus one?"};
+    passed &= crab_conversation_receive(&app->crab_conversation, &chat_message);
+    chat_message.state = CRAB_SPEAKING;
+    wcscpy(chat_message.answer, L"One plus one is two.");
+    passed &= crab_conversation_receive(&app->crab_conversation, &chat_message);
+    app->crab_follow_latest = true;
+    passed &= smoke_frame(app, directory, L"crab-chat-reply");
+    for (int i = 0; i < app->hit_count; ++i) {
+        RectF rect = app->hits[i].rect;
+        passed &= rect.X >= app->renderer.body.X && rect.Y >= app->renderer.body.Y;
+        passed &= rect.X + rect.Width <= app->renderer.body.X + app->renderer.body.Width;
+        passed &= rect.Y + rect.Height <= app->renderer.body.Y + app->renderer.body.Height;
+    }
+    chat_message = (CrabMessage){.state = CRAB_THINKING, .transcript = L"Can you explain that?"};
+    passed &= crab_conversation_receive(&app->crab_conversation, &chat_message);
+    chat_message.state = CRAB_SPEAKING;
+    wcscpy(chat_message.answer,
+           L"Think of one object next to another object. Counting both gives two. "
+           L"This longer sample checks wrapped lines, scrolling, and the complete text available "
+           L"to screen readers without a real microphone or provider request.");
+    passed &= crab_conversation_receive(&app->crab_conversation, &chat_message);
+    passed &= smoke_frame(app, directory, L"crab-chat-wrapped");
+    passed &= app->crab_scroll_max > 0;
+    app->crab_scroll = 0;
+    app->crab_follow_latest = false;
+    passed &= smoke_frame(app, directory, L"crab-chat-earlier");
+    chat_message = (CrabMessage){.state = CRAB_THINKING, .transcript = L"Try another question"};
+    passed &= crab_conversation_receive(&app->crab_conversation, &chat_message);
+    chat_message.state = CRAB_ERROR;
+    chat_message.error = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+    wcscpy(chat_message.answer, L"Provider timed out. Please try again.");
+    passed &= crab_conversation_receive(&app->crab_conversation, &chat_message);
+    app->crab_state = CRAB_ERROR;
+    app->crab_follow_latest = true;
+    passed &= app_target_size(app).width == app->config.expanded_width;
+    passed &= smoke_frame(app, directory, L"crab-chat-error");
+    crab_conversation_clear(&app->crab_conversation);
     app->crab_state = CRAB_DISABLED;
     island_open(&app->island, ISLAND_MEDIA);
     passed &= smoke_frame(app, directory, L"media-empty");
@@ -1825,8 +1999,8 @@ static int smoke_test(App *app, const wchar_t *directory) {
     report = _wfopen(path, L"w");
     if (report) {
         fprintf(report,
-                "%s: 23 native render states, layout, Crab error states, alpha hit-testing, MSAA "
-                "names and roles\n",
+                "%s: 28 native render states, layout, Crab conversation and error states, alpha "
+                "hit-testing, MSAA names and roles\n",
                 passed ? "PASS" : "FAIL");
         fclose(report);
     } else {
@@ -1898,7 +2072,8 @@ static bool create_app(App *app, const Options *options) {
         app->headphones = (HeadphoneSnapshot){.initialized = true, .error = E_FAIL};
     if (!crab_start(&app->crab_service, app->window, app->config.crab_enabled,
                     app->config.crab_speak, app->config.crab_provider, app->config.crab_name,
-                    app->config.crab_base_url, app->config.crab_model)) {
+                    app->config.crab_base_url, app->config.crab_model,
+                    app->config.crab_speech_model)) {
         app->crab_state = CRAB_ERROR;
         app->crab_error = E_FAIL;
     } else {
@@ -1965,8 +2140,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command, int s
                     L"Ctrl+Alt+H: hide/show island\nCtrl+Alt+Space: start/cancel Crab\n"
                     L"Click/hover: expand\nRight-click: settings and quit\n"
                     L"Tab: move focus\n1/2/3: media/timer/system\nEscape: collapse\n"
-                    L"Mouse wheel: volume\n\n"
-                    L"--view media|timer|system\n--reduced-motion\n--demo (simulated media)\n"
+                    L"Mouse wheel: volume, or scroll the conversation\n\n"
+                    L"--view media|timer|system|crab\n--reduced-motion\n--demo (simulated media)\n"
                     L"--run-for SECONDS (automatic exit)\n--settings\n--config FILE\n"
                     L"--smoke-test DIRECTORY",
                     L"DynamicWindows", MB_OK | MB_ICONINFORMATION);

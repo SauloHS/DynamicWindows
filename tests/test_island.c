@@ -183,6 +183,21 @@ static void test_frame_independent_spring(void) {
     }
 }
 
+static void test_crab_view(void) {
+    Island island;
+    island_init(&island);
+    island.media_available = true;
+    island_open(&island, ISLAND_CRAB);
+    CHECK(island.expanded);
+    CHECK(island.view == ISLAND_CRAB);
+    CHECK(island_primary(&island) == ACTIVITY_MEDIA);
+    CHECK(island_size(&island).width == 408);
+    CHECK(island_size(&island).bubble == 0);
+    island_close(&island);
+    CHECK(!island.expanded);
+    CHECK(island.view == ISLAND_CRAB);
+}
+
 static void test_geometry(void) {
     CHECK(island_contains(84, 22, 168, 44, 22));
     CHECK(island_contains(22, 0, 168, 44, 22));
@@ -204,6 +219,7 @@ int main(void) {
     test_expired_pause();
     test_alerts();
     test_activities();
+    test_crab_view();
     test_spring();
     test_frame_independent_spring();
     test_geometry();

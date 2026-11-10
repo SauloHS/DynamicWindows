@@ -4,7 +4,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef enum { ISLAND_MEDIA, ISLAND_TIMER, ISLAND_SYSTEM, ISLAND_NOTIFICATIONS } IslandView;
+typedef enum {
+    ISLAND_MEDIA,
+    ISLAND_TIMER,
+    ISLAND_SYSTEM,
+    ISLAND_NOTIFICATIONS,
+    ISLAND_CRAB
+} IslandView;
 typedef enum { ACTIVITY_NONE, ACTIVITY_MEDIA, ACTIVITY_TIMER } IslandActivity;
 typedef enum {
     ALERT_NONE,

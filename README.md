@@ -110,11 +110,23 @@ Allowed toast notifications briefly appear on the island and remain available in
 
 ### Crab voice assistant
 
-Crab is an **opt-in** native voice assistant. Enable it in **Crab**, choose an API format, set a base URL and model, then connect an API key when the endpoint requires one. Press **Ctrl + Alt + Space** and say the configured wake name followed by a question—for example, “Crab, what’s 1 + 1?” Change the wake name to “Siri” or another phrase if preferred.
+Crab is an **opt-in** native voice assistant. Enable it in **Crab**, choose an API format, set a base URL and model, then connect an API key when the endpoint requires one. Press **Ctrl + Alt + Space**, wait for the cyan listening orb, and ask your question directly—for example, “What’s 1 + 1?” The configured name is optional: “Crab, what’s 1 + 1?” also works. Change the name to “Siri” or another phrase if preferred.
 
-Activation morphs the island into an original liquid-glass orb. Cyan, violet, and magenta layers distinguish listening, thinking, and speaking without relying on text; reduced motion uses a stable glass state. Windows Speech Recognition performs local transcription. Crab supports **Anthropic Messages** and **OpenAI-compatible Chat Completions** endpoints, including local Ollama-style servers. Windows text-to-speech can read answers aloud.
+Activation morphs the island into an original liquid-glass orb. Cyan, violet, and magenta layers distinguish listening, thinking, and speaking without relying on text; reduced motion uses a stable glass state. Whisper performs local audio recognition. Crab supports **Anthropic Messages** and **OpenAI-compatible Chat Completions** endpoints, including local Ollama-style servers. Windows text-to-speech can read answers aloud.
 
-The API key is stored in **Windows Credential Manager**, never `settings.ini`, and isolated by API format plus normalized base URL. Crab sends only the recognized question to the configured endpoint after activation. HTTPS is required for remote endpoints; plain HTTP is accepted only for `localhost`, `127.0.0.1`, or `::1`. It has no OS-control tools and cannot claim to have performed actions. Microphone capture starts only from the Crab shortcut, not continuously in the background. Press the shortcut again or click the orb to cancel.
+Install the **Whisper runtime v1.8.2** and local multilingual speech model before using voice input:
+
+```powershell
+pwsh -File packaging\setup-speech.ps1 -BuildDirectory build
+```
+
+This explicit setup downloads about 78 MB of model data plus the native runtime, verifies pinned SHA-256 hashes, and stores them in `build/speech`. It does not record audio or run transcription. The official runtime requires Microsoft's **Visual C++ 2015–2022 x64 Redistributable**, including OpenMP; setup reports missing dependencies but does not install them. Download it only from Microsoft if needed.
+
+**Crab → Speech model path** defaults to `speech\ggml-tiny.bin` relative to `DynamicWindows.exe`; an absolute path is also supported. This is separate from the provider's **Model** ID. The first activation loads the model, then the cyan orb indicates listening. Speak after it turns cyan. Capture ends after a pause or 12 seconds; transcription runs locally with a 30-second deadline. Audio stays in memory and is cleared after transcription. No online Windows speech-recognition consent is needed.
+
+The **Chat** tab shows the exact recognized speech in right-aligned “You · heard” bubbles and replies on the left. Completed replies open the conversation without taking foreground focus. Use the mouse wheel, arrow/Page keys, or earlier/later buttons to scroll; **Talk** starts the next question and **Clear** removes the history. The latest six exchanges stay in memory only. Successful exchanges are sent as context to the same configured provider for follow-up questions; errors and cancelled requests are not reused. Clearing, disabling Crab, changing provider/endpoint/model, or quitting removes the conversation.
+
+The API key is stored in **Windows Credential Manager**, never `settings.ini`, and isolated by API format plus normalized base URL. After activation, Crab sends the recognized question and bounded successful conversation context to the configured endpoint, never audio. HTTPS is required for remote endpoints; plain HTTP is accepted only for `localhost`, `127.0.0.1`, or `::1`. It has no OS-control tools and cannot claim to have performed actions. Microphone capture starts only from the Crab shortcut, **Talk**, or the explicit tray **Start Crab** action, not continuously in the background. Press the shortcut again or click the orb to cancel.
 
 ### Timers and system activity
 
@@ -139,7 +151,7 @@ Open settings with **Ctrl + Alt + C**, **right-click → Customize DynamicWindow
 | **Behavior** | Activity visibility, artwork background, waveform, media details, preview duration, volume/power alerts, hover delays, timer sound, and full-screen hiding. |
 | **Shortcuts** | Global and local key bindings, with duplicate validation and optional disabling. |
 | **Notifications** | Explicit Windows permission, source-only privacy mode, preview duration, and current access status. |
-| **Crab** | Voice-assistant opt-in, wake name, Claude model, spoken replies, and secure API-key connection. |
+| **Crab** | Voice-assistant opt-in, wake name, local speech model path, provider model, spoken replies, and secure API-key connection. |
 
 <p align="center"><img src="assets/settings.png" alt="DynamicWindows native settings window" width="760" /></p>
 
@@ -176,8 +188,8 @@ MSIX installation requires a trusted code-signing certificate. Pass its exact su
 ## Privacy, honestly
 
 - No background app network requests, telemetry, accounts, or cloud configuration. Crab contacts only the configured provider endpoint after explicit activation.
-- No continuous microphone capture, audio recording, camera access, or screen recording.
-- Crab uses the microphone only after explicit shortcut activation and sends the recognized question to the configured provider when enabled.
+- No continuous microphone capture, saved audio recordings, camera access, or screen recording.
+- Crab uses the microphone only after an explicit shortcut, **Talk**, or tray **Start Crab** activation and sends recognized text plus bounded successful conversation context to the configured provider when enabled.
 - No notification access unless explicitly enabled and granted by Windows.
 - Media metadata comes from **Windows GSMTC**. The waveform uses an audio-output peak meter.
 - An outside-click listener is active for manually opened controls; it closes the island without swallowing the click.
@@ -226,7 +238,7 @@ cmake --build build --target lint
 - **Configuration tests:** defaults, Unicode persistence, limits, placement, malformed input, and notification privacy defaults.
 - **Notification tests:** duplicate suppression, baseline handling, text sanitation, bounded history, and permission-state labels. They do not request permission or read real notifications.
 - **Headphone tests:** connection/disconnection deltas, Bluetooth identity, validated battery values, unavailable battery text, and bounded events. No mouse, audio changes, or hardware required.
-- **Crab tests:** wake-name parsing, JSON escaping, Messages API text extraction, and state labels. They do not use microphone, network, credentials, speech, or GUI.
+- **Crab tests:** optional name-prefix handling, JSON escaping, response extraction, bounded conversation ordering/eviction, cleared context, and provider request history. They do not use microphone, network, credentials, speech, or GUI.
 - **Native smoke:** renders representative states and checks alpha hit-testing and accessibility names/roles.
 
 Optional GUI checks require Python 3 and an interactive Windows desktop. They move the pointer, foreground the test app, and save local screenshots. The settings check also verifies the Notifications and Crab pages without pressing permission or API-key buttons. Quit any existing instance first, and do not share screenshots containing private desktop content.

@@ -1,6 +1,6 @@
 #include "crab.h"
+#include "speech.h"
 
-#include <roapi.h>
 #include <sapi.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,105 +9,116 @@
 #include <wctype.h>
 #include <wincred.h>
 #include <winhttp.h>
-#include <winstring.h>
 
 #define CRAB_MAX_RESPONSE (1024 * 1024)
 
-#define ABI_OBJECT(name)                                                                           \
-    typedef struct name name;                                                                      \
-    typedef struct name##Vtbl name##Vtbl;                                                          \
-    struct name {                                                                                  \
-        const name##Vtbl *lpVtbl;                                                                  \
-    }
-
-#define ABI_INSPECTABLE(name)                                                                      \
-    HRESULT(STDMETHODCALLTYPE *QueryInterface)(name *, REFIID, void **);                           \
-    ULONG(STDMETHODCALLTYPE *AddRef)(name *);                                                      \
-    ULONG(STDMETHODCALLTYPE *Release)(name *);                                                     \
-    HRESULT(STDMETHODCALLTYPE *GetIids)(name *, ULONG *, IID **);                                  \
-    HRESULT(STDMETHODCALLTYPE *GetRuntimeClassName)(name *, HSTRING *);                            \
-    HRESULT(STDMETHODCALLTYPE *GetTrustLevel)(name *, TrustLevel *)
-
-typedef INT32 CrabAsyncStatus;
-typedef INT32 CrabRecognitionStatus;
-ABI_OBJECT(CrabRecognizer);
-ABI_OBJECT(CrabCompilationOperation);
-ABI_OBJECT(CrabCompilationResult);
-ABI_OBJECT(CrabRecognitionOperation);
-ABI_OBJECT(CrabRecognitionResult);
-ABI_OBJECT(CrabAsyncInfo);
-ABI_OBJECT(CrabClosable);
-
-struct CrabRecognizerVtbl {
-    ABI_INSPECTABLE(CrabRecognizer);
-    HRESULT(STDMETHODCALLTYPE *CurrentLanguage)(CrabRecognizer *, IInspectable **);
-    HRESULT(STDMETHODCALLTYPE *Constraints)(CrabRecognizer *, IInspectable **);
-    HRESULT(STDMETHODCALLTYPE *Timeouts)(CrabRecognizer *, IInspectable **);
-    HRESULT(STDMETHODCALLTYPE *UIOptions)(CrabRecognizer *, IInspectable **);
-    HRESULT(STDMETHODCALLTYPE *CompileConstraints)(CrabRecognizer *, CrabCompilationOperation **);
-    HRESULT(STDMETHODCALLTYPE *Recognize)(CrabRecognizer *, CrabRecognitionOperation **);
-};
-
-struct CrabCompilationOperationVtbl {
-    ABI_INSPECTABLE(CrabCompilationOperation);
-    HRESULT(STDMETHODCALLTYPE *PutCompleted)(CrabCompilationOperation *, IUnknown *);
-    HRESULT(STDMETHODCALLTYPE *GetCompleted)(CrabCompilationOperation *, IUnknown **);
-    HRESULT(STDMETHODCALLTYPE *GetResults)(CrabCompilationOperation *, CrabCompilationResult **);
-};
-
-struct CrabCompilationResultVtbl {
-    ABI_INSPECTABLE(CrabCompilationResult);
-    HRESULT(STDMETHODCALLTYPE *Status)(CrabCompilationResult *, CrabRecognitionStatus *);
-};
-
-struct CrabRecognitionOperationVtbl {
-    ABI_INSPECTABLE(CrabRecognitionOperation);
-    HRESULT(STDMETHODCALLTYPE *PutCompleted)(CrabRecognitionOperation *, IUnknown *);
-    HRESULT(STDMETHODCALLTYPE *GetCompleted)(CrabRecognitionOperation *, IUnknown **);
-    HRESULT(STDMETHODCALLTYPE *GetResults)(CrabRecognitionOperation *, CrabRecognitionResult **);
-};
-
-struct CrabRecognitionResultVtbl {
-    ABI_INSPECTABLE(CrabRecognitionResult);
-    HRESULT(STDMETHODCALLTYPE *Status)(CrabRecognitionResult *, CrabRecognitionStatus *);
-    HRESULT(STDMETHODCALLTYPE *Text)(CrabRecognitionResult *, HSTRING *);
-};
-
-struct CrabAsyncInfoVtbl {
-    ABI_INSPECTABLE(CrabAsyncInfo);
-    HRESULT(STDMETHODCALLTYPE *Id)(CrabAsyncInfo *, UINT32 *);
-    HRESULT(STDMETHODCALLTYPE *Status)(CrabAsyncInfo *, CrabAsyncStatus *);
-    HRESULT(STDMETHODCALLTYPE *Error)(CrabAsyncInfo *, HRESULT *);
-    HRESULT(STDMETHODCALLTYPE *Cancel)(CrabAsyncInfo *);
-    HRESULT(STDMETHODCALLTYPE *Close)(CrabAsyncInfo *);
-};
-
-struct CrabClosableVtbl {
-    ABI_INSPECTABLE(CrabClosable);
-    HRESULT(STDMETHODCALLTYPE *Close)(CrabClosable *);
-};
-
-static const IID crab_recognizer_iid = {
-    0x0bc3c9cb, 0xc26a, 0x40f2, {0xae, 0xb5, 0x80, 0x96, 0xb2, 0xe4, 0x80, 0x73}};
-static const IID crab_async_info_iid = {
-    0x00000036, 0x0000, 0x0000, {0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}};
-static const IID crab_closable_iid = {
-    0x30d5a829, 0x7fa4, 0x4026, {0x83, 0xbb, 0xd7, 0x5b, 0xae, 0x4e, 0xa9, 0x9e}};
-
-#define ABI_SLOT(type, member, slot)                                                               \
-    _Static_assert(offsetof(type##Vtbl, member) == (slot) * sizeof(void *), "WinRT ABI slot")
-ABI_SLOT(CrabRecognizer, CompileConstraints, 10);
-ABI_SLOT(CrabRecognizer, Recognize, 11);
-ABI_SLOT(CrabCompilationOperation, GetResults, 8);
-ABI_SLOT(CrabCompilationResult, Status, 6);
-ABI_SLOT(CrabRecognitionOperation, GetResults, 8);
-ABI_SLOT(CrabRecognitionResult, Status, 6);
-ABI_SLOT(CrabRecognitionResult, Text, 7);
-ABI_SLOT(CrabAsyncInfo, Status, 7);
-ABI_SLOT(CrabAsyncInfo, Cancel, 9);
-ABI_SLOT(CrabClosable, Close, 6);
-
 static const wchar_t user_agent[] = L"DynamicWindows/0.1 Crab";
+
+static CrabTurn *conversation_append(CrabConversation *conversation) {
+    if (conversation->count == CRAB_HISTORY) {
+        SecureZeroMemory(&conversation->turns[0], sizeof(conversation->turns[0]));
+        memmove(conversation->turns, conversation->turns + 1,
+                (CRAB_HISTORY - 1) * sizeof(conversation->turns[0]));
+        --conversation->count;
+    }
+    CrabTurn *turn = &conversation->turns[conversation->count++];
+    SecureZeroMemory(turn, sizeof(*turn));
+    return turn;
+}
+
+bool crab_conversation_receive(CrabConversation *conversation, const CrabMessage *message) {
+    if (!conversation || !message || conversation->count > CRAB_HISTORY ||
+        (conversation->pending && !conversation->count))
+        return false;
+    CrabTurn *turn = conversation->count ? &conversation->turns[conversation->count - 1] : NULL;
+    if (message->state == CRAB_THINKING) {
+        if (!message->transcript[0] || conversation->pending)
+            return false;
+        turn = conversation_append(conversation);
+        wcsncpy(turn->transcript, message->transcript, 767);
+        turn->state = CRAB_TURN_WAITING;
+        conversation->pending = true;
+        return true;
+    }
+    if (message->state == CRAB_SPEAKING || message->state == CRAB_IDLE) {
+        if (!message->answer[0] || (message->state == CRAB_IDLE && !conversation->pending))
+            return false;
+        if (!conversation->pending) {
+            bool same_transcript =
+                turn && (!message->transcript[0] ||
+                         wcsncmp(turn->transcript, message->transcript, 768) == 0);
+            if (same_transcript && ((turn->state == CRAB_TURN_ANSWERED &&
+                                     wcsncmp(turn->answer, message->answer, 2048) == 0) ||
+                                    turn->state == CRAB_TURN_CANCELLED))
+                return false;
+            turn = conversation_append(conversation);
+            wcsncpy(turn->transcript, message->transcript, 767);
+        }
+        wcsncpy(turn->answer, message->answer, 2047);
+        turn->state = CRAB_TURN_ANSWERED;
+        turn->error = S_OK;
+        conversation->pending = false;
+        return true;
+    }
+    if (message->state != CRAB_ERROR)
+        return false;
+    if (!conversation->pending) {
+        if (turn && turn->state == CRAB_TURN_ERROR && turn->error == message->error &&
+            (!message->transcript[0] || wcsncmp(turn->transcript, message->transcript, 768) == 0) &&
+            wcsncmp(turn->detail, message->answer, 159) == 0)
+            return false;
+        turn = conversation_append(conversation);
+    }
+    if (message->transcript[0]) {
+        SecureZeroMemory(turn->transcript, sizeof(turn->transcript));
+        wcsncpy(turn->transcript, message->transcript, 767);
+    }
+    SecureZeroMemory(turn->answer, sizeof(turn->answer));
+    SecureZeroMemory(turn->detail, sizeof(turn->detail));
+    wcsncpy(turn->detail, message->answer, 159);
+    turn->state = CRAB_TURN_ERROR;
+    turn->error = message->error;
+    conversation->pending = false;
+    return true;
+}
+
+bool crab_conversation_cancel(CrabConversation *conversation) {
+    if (!conversation || !conversation->pending || !conversation->count ||
+        conversation->count > CRAB_HISTORY)
+        return false;
+    CrabTurn *turn = &conversation->turns[conversation->count - 1];
+    SecureZeroMemory(turn->answer, sizeof(turn->answer));
+    SecureZeroMemory(turn->detail, sizeof(turn->detail));
+    turn->state = CRAB_TURN_CANCELLED;
+    turn->error = E_ABORT;
+    conversation->pending = false;
+    return true;
+}
+
+void crab_conversation_clear(CrabConversation *conversation) {
+    if (conversation)
+        SecureZeroMemory(conversation, sizeof(*conversation));
+}
+
+const wchar_t *crab_turn_reply(const CrabTurn *turn) {
+    if (turn->state == CRAB_TURN_ANSWERED)
+        return *turn->answer ? turn->answer : L"No reply received.";
+    if (turn->state == CRAB_TURN_ERROR)
+        return *turn->detail ? turn->detail : L"The request failed. Try again.";
+    return turn->state == CRAB_TURN_CANCELLED ? L"Cancelled" : L"Waiting for a reply…";
+}
+
+void crab_message_free(CrabMessage *message) {
+    if (!message)
+        return;
+    SecureZeroMemory(message, sizeof(*message));
+    free(message);
+}
+
+bool crab_message_current(CrabService *service, const CrabMessage *message) {
+    return service && message && !InterlockedCompareExchange(&service->cancel_request, 0, 0) &&
+           message->generation == InterlockedCompareExchange(&service->generation, 0, 0);
+}
 
 static bool endpoint_loopback(const wchar_t *host) {
     return _wcsicmp(host, L"localhost") == 0 || _wcsicmp(host, L"127.0.0.1") == 0 ||
@@ -199,16 +210,19 @@ static bool word_boundary(wchar_t value) {
 
 bool crab_wake_match(const wchar_t *text, const wchar_t *wake_name, wchar_t *question,
                      size_t count) {
-    if (!text || !wake_name || !*wake_name || !question || count == 0)
+    if (!text || !question || count == 0)
         return false;
+    question[0] = L'\0';
     while (iswspace(*text))
         ++text;
-    size_t wake_length = wcslen(wake_name);
-    if (_wcsnicmp(text, wake_name, wake_length) != 0 || !word_boundary(text[wake_length]))
-        return false;
-    text += wake_length;
-    while (*text && (iswspace(*text) || iswpunct(*text)))
-        ++text;
+    if (wake_name && *wake_name) {
+        size_t wake_length = wcslen(wake_name);
+        if (_wcsnicmp(text, wake_name, wake_length) == 0 && word_boundary(text[wake_length])) {
+            text += wake_length;
+            while (*text && (iswspace(*text) || iswpunct(*text)))
+                ++text;
+        }
+    }
     if (!*text)
         return false;
     wcsncpy(question, text, count - 1);
@@ -294,6 +308,81 @@ bool crab_json_string(const wchar_t *value, char *json, size_t count) {
             return false;
     }
     return append_bytes(json, count, &used, "\"", 1);
+}
+
+static bool request_string(char *output, size_t count, size_t *used, const wchar_t *value,
+                           size_t limit) {
+    if (!value)
+        return false;
+    size_t length = 0;
+    while (length < limit && value[length])
+        ++length;
+    if (length == limit || *used >= count ||
+        !crab_json_string(value, output + *used, count - *used))
+        return false;
+    *used += strlen(output + *used);
+    return true;
+}
+
+static bool request_message(char *output, size_t count, size_t *used, const char *role,
+                            const wchar_t *content, size_t limit, bool comma) {
+    if (comma && !append_bytes(output, count, used, ",", 1))
+        return false;
+    return append_bytes(output, count, used, "{\"role\":\"", 9) &&
+           append_bytes(output, count, used, role, strlen(role)) &&
+           append_bytes(output, count, used, "\",\"content\":", 12) &&
+           request_string(output, count, used, content, limit) &&
+           append_bytes(output, count, used, "}", 1);
+}
+
+bool crab_request_json(CrabProvider provider, const wchar_t *model, const wchar_t *question,
+                       const CrabConversation *conversation, char *output, size_t count) {
+    if (!output || !count)
+        return false;
+    output[0] = '\0';
+    if ((provider != CRAB_PROVIDER_ANTHROPIC && provider != CRAB_PROVIDER_OPENAI_COMPATIBLE) ||
+        !model || !*model || !question || !*question ||
+        (conversation && conversation->count > CRAB_HISTORY))
+        return false;
+    if (count > CRAB_REQUEST_BYTES)
+        count = CRAB_REQUEST_BYTES;
+    static const char system[] =
+        "\"You are Crab, a concise Windows voice assistant. Answer directly in plain text suitable "
+        "for speech. Keep most answers under 120 words. Never claim to have performed an action "
+        "you cannot perform.\"";
+    static const char anthropic[] =
+        ",\"max_tokens\":1024,\"fallbacks\":\"default\",\"output_config\":{\"effort\":\"medium\"},"
+        "\"system\":";
+    static const char openai[] =
+        ",\"max_tokens\":1024,\"stream\":false,\"messages\":[{\"role\":\"system\",\"content\":";
+    bool is_anthropic = provider == CRAB_PROVIDER_ANTHROPIC;
+    const char *settings = is_anthropic ? anthropic : openai;
+    const char *messages = is_anthropic ? ",\"messages\":[" : "}";
+    size_t used = 0;
+    if (!append_bytes(output, count, &used, "{\"model\":", 9) ||
+        !request_string(output, count, &used, model, 96) ||
+        !append_bytes(output, count, &used, settings, strlen(settings)) ||
+        !append_bytes(output, count, &used, system, sizeof(system) - 1) ||
+        !append_bytes(output, count, &used, messages, strlen(messages)))
+        goto failed;
+    bool comma = !is_anthropic;
+    unsigned turns = conversation ? conversation->count : 0;
+    for (unsigned i = 0; i < turns; ++i) {
+        const CrabTurn *turn = &conversation->turns[i];
+        if (turn->state != CRAB_TURN_ANSWERED || !turn->transcript[0] || !turn->answer[0])
+            continue;
+        if (!request_message(output, count, &used, "user", turn->transcript, 768, comma) ||
+            !request_message(output, count, &used, "assistant", turn->answer, 2048, true))
+            goto failed;
+        comma = true;
+    }
+    if (!request_message(output, count, &used, "user", question, 768, comma) ||
+        !append_bytes(output, count, &used, "]}", 2))
+        goto failed;
+    return true;
+failed:
+    output[0] = '\0';
+    return false;
 }
 
 static const char *skip_space(const char *cursor) {
@@ -584,164 +673,26 @@ static void request_cancel(CrabService *service) {
         WinHttpCloseHandle(request);
 }
 
-static void post_state(CrabService *service, CrabState state, HRESULT error,
+static void post_state(CrabService *service, LONG generation, CrabState state, HRESULT error,
                        const wchar_t *transcript, const wchar_t *answer) {
     if (!service || !service->window ||
-        (state != CRAB_LISTENING && InterlockedCompareExchange(&service->cancel_request, 0, 0)))
+        InterlockedCompareExchange(&service->cancel_request, 0, 0) ||
+        generation != InterlockedCompareExchange(&service->generation, 0, 0))
         return;
     CrabMessage *message = calloc(1, sizeof(*message));
     if (!message)
         return;
     message->state = state;
     message->error = error;
+    message->generation = generation;
     if (transcript)
         wcsncpy(message->transcript, transcript, 767);
     if (answer)
         wcsncpy(message->answer, answer, 2047);
     if (!PostMessageW(service->window, WM_DYNAMICWINDOWS_CRAB, 0, (LPARAM)message))
-        free(message);
+        crab_message_free(message);
 }
 
-static HRESULT modern_wait(CrabService *service, IUnknown *operation, DWORD timeout) {
-    CrabAsyncInfo *info = NULL;
-    HRESULT result = IUnknown_QueryInterface(operation, &crab_async_info_iid, (void **)&info);
-    if (FAILED(result))
-        return result;
-    uint64_t deadline = GetTickCount64() + timeout;
-    CrabAsyncStatus status = 0;
-    while (GetTickCount64() < deadline) {
-        result = info->lpVtbl->Status(info, &status);
-        if (FAILED(result) || status != 0)
-            break;
-        if (WaitForSingleObject(service->stop, 20) == WAIT_OBJECT_0 ||
-            InterlockedCompareExchange(&service->cancel_request, 0, 0)) {
-            info->lpVtbl->Cancel(info);
-            result = E_ABORT;
-            break;
-        }
-    }
-    if (SUCCEEDED(result) && status == 3) {
-        HRESULT error = E_FAIL;
-        HRESULT error_result = info->lpVtbl->Error(info, &error);
-        result = FAILED(error_result) ? error_result : error;
-    } else if (SUCCEEDED(result) && status == 2) {
-        result = E_ABORT;
-    } else if (SUCCEEDED(result) && status == 0) {
-        info->lpVtbl->Cancel(info);
-        result = HRESULT_FROM_WIN32(ERROR_TIMEOUT);
-    }
-    info->lpVtbl->Release(info);
-    return result;
-}
-
-static void modern_close(IUnknown *operation) {
-    CrabAsyncInfo *info = NULL;
-    if (SUCCEEDED(IUnknown_QueryInterface(operation, &crab_async_info_iid, (void **)&info))) {
-        info->lpVtbl->Close(info);
-        info->lpVtbl->Release(info);
-    }
-}
-
-static HRESULT modern_compile(CrabService *service, CrabRecognizer *recognizer) {
-    CrabCompilationOperation *operation = NULL;
-    CrabCompilationResult *compilation = NULL;
-    HRESULT result = recognizer->lpVtbl->CompileConstraints(recognizer, &operation);
-    if (SUCCEEDED(result) && !operation)
-        result = E_FAIL;
-    if (SUCCEEDED(result))
-        result = modern_wait(service, (IUnknown *)operation, 12000);
-    if (SUCCEEDED(result))
-        result = operation->lpVtbl->GetResults(operation, &compilation);
-    if (SUCCEEDED(result) && compilation) {
-        CrabRecognitionStatus status = 6;
-        result = compilation->lpVtbl->Status(compilation, &status);
-        if (SUCCEEDED(result) && status != 0)
-            result = status == 5                  ? E_ABORT
-                     : status == 7 || status == 8 ? HRESULT_FROM_WIN32(ERROR_TIMEOUT)
-                     : status == 10               ? HRESULT_FROM_WIN32(ERROR_DEVICE_NOT_AVAILABLE)
-                                                  : HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
-    }
-    if (compilation)
-        compilation->lpVtbl->Release(compilation);
-    if (operation) {
-        modern_close((IUnknown *)operation);
-        operation->lpVtbl->Release(operation);
-    }
-    return result;
-}
-
-static HRESULT modern_operation_wait(CrabService *service, CrabRecognitionOperation *operation,
-                                     DWORD timeout, CrabRecognitionResult **recognition) {
-    HRESULT result = modern_wait(service, (IUnknown *)operation, timeout);
-    if (SUCCEEDED(result))
-        result = operation->lpVtbl->GetResults(operation, recognition);
-    return result;
-}
-
-static HRESULT modern_listen_once(CrabService *service, wchar_t *text, size_t count) {
-    static const wchar_t class_name[] = L"Windows.Media.SpeechRecognition.SpeechRecognizer";
-    HSTRING name = NULL;
-    HRESULT result = WindowsCreateString(
-        class_name, (UINT32)(sizeof(class_name) / sizeof(class_name[0]) - 1), &name);
-    IInspectable *instance = NULL;
-    CrabRecognizer *recognizer = NULL;
-    CrabRecognitionOperation *operation = NULL;
-    CrabRecognitionResult *recognition = NULL;
-    if (SUCCEEDED(result))
-        result = RoActivateInstance(name, &instance);
-    if (SUCCEEDED(result))
-        result = IInspectable_QueryInterface(instance, &crab_recognizer_iid, (void **)&recognizer);
-    if (SUCCEEDED(result))
-        result = modern_compile(service, recognizer);
-    if (SUCCEEDED(result))
-        result = recognizer->lpVtbl->Recognize(recognizer, &operation);
-    if (SUCCEEDED(result) && !operation)
-        result = E_FAIL;
-    if (SUCCEEDED(result))
-        result = modern_operation_wait(service, operation, 12000, &recognition);
-    if (SUCCEEDED(result) && recognition) {
-        CrabRecognitionStatus status = 6;
-        result = recognition->lpVtbl->Status(recognition, &status);
-        if (SUCCEEDED(result) && status == 0) {
-            HSTRING value = NULL;
-            result = recognition->lpVtbl->Text(recognition, &value);
-            if (SUCCEEDED(result) && value) {
-                UINT32 length = 0;
-                const wchar_t *source = WindowsGetStringRawBuffer(value, &length);
-                size_t copied = source && length < count - 1 ? length : source ? count - 1 : 0;
-                if (copied)
-                    wmemcpy(text, source, copied);
-                text[copied] = L'\0';
-                WindowsDeleteString(value);
-            }
-        } else if (SUCCEEDED(result)) {
-            result = status == 5                  ? E_ABORT
-                     : status == 7 || status == 8 ? HRESULT_FROM_WIN32(ERROR_TIMEOUT)
-                     : status == 10               ? HRESULT_FROM_WIN32(ERROR_DEVICE_NOT_AVAILABLE)
-                                                  : HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
-        }
-    }
-    if (recognition)
-        recognition->lpVtbl->Release(recognition);
-    if (operation) {
-        modern_close((IUnknown *)operation);
-        operation->lpVtbl->Release(operation);
-    }
-    if (recognizer) {
-        CrabClosable *closable = NULL;
-        if (SUCCEEDED(recognizer->lpVtbl->QueryInterface(recognizer, &crab_closable_iid,
-                                                         (void **)&closable))) {
-            closable->lpVtbl->Close(closable);
-            closable->lpVtbl->Release(closable);
-        }
-        recognizer->lpVtbl->Release(recognizer);
-    }
-    if (instance)
-        IInspectable_Release(instance);
-    if (name)
-        WindowsDeleteString(name);
-    return *text ? result : FAILED(result) ? result : HRESULT_FROM_WIN32(ERROR_TIMEOUT);
-}
 static bool response_read(HINTERNET request, char **response) {
     *response = NULL;
     size_t used = 0;
@@ -784,61 +735,58 @@ failed:
 }
 
 static HRESULT ask_provider(CrabService *service, const wchar_t *question, wchar_t *answer,
-                            size_t count) {
+                            size_t count, wchar_t *detail, size_t detail_count) {
     if (InterlockedCompareExchange(&service->cancel_request, 0, 0))
         return E_ABORT;
     CrabProvider provider;
     wchar_t base_url[512];
     wchar_t model_name[96];
+    CrabConversation context;
     EnterCriticalSection(&service->lock);
     provider = service->provider;
     wcsncpy(base_url, service->base_url, 511);
     base_url[511] = L'\0';
     wcsncpy(model_name, service->model, 95);
     model_name[95] = L'\0';
+    context = service->context;
     LeaveCriticalSection(&service->lock);
     CrabEndpoint endpoint;
-    if (!crab_endpoint_parse(provider, base_url, &endpoint) || !*model_name)
+    if (!crab_endpoint_parse(provider, base_url, &endpoint) || !*model_name) {
+        crab_conversation_clear(&context);
         return HRESULT_FROM_WIN32(ERROR_INVALID_PARAMETER);
+    }
     char key[CRED_MAX_CREDENTIAL_BLOB_SIZE + 1] = {0};
     bool has_key = key_read(provider, base_url, key, sizeof(key));
-    if (!has_key && (provider == CRAB_PROVIDER_ANTHROPIC || endpoint.secure))
+    if (!has_key && (provider == CRAB_PROVIDER_ANTHROPIC || endpoint.secure)) {
+        crab_conversation_clear(&context);
         return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
-    char prompt[8192];
-    char model[256];
-    if (!crab_json_string(question, prompt, sizeof(prompt)) ||
-        !crab_json_string(model_name, model, sizeof(model))) {
-        SecureZeroMemory(key, sizeof(key));
-        return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
     }
-    static const char anthropic_format[] =
-        "{\"model\":%s,\"max_tokens\":1024,\"fallbacks\":\"default\","
-        "\"output_config\":{\"effort\":\"medium\"},"
-        "\"system\":\"You are Crab, a concise Windows voice assistant. Answer directly in "
-        "plain text suitable for speech. Keep most answers under 120 words. Never claim to have "
-        "performed an action you cannot perform.\",\"messages\":[{\"role\":\"user\","
-        "\"content\":%s}]}";
-    static const char openai_format[] =
-        "{\"model\":%s,\"max_tokens\":1024,\"stream\":false,\"messages\":["
-        "{\"role\":\"system\",\"content\":\"You are Crab, a concise Windows voice "
-        "assistant. Answer directly in plain text suitable for speech. Keep most answers under "
-        "120 words. Never claim to have performed an action you cannot perform.\"},"
-        "{\"role\":\"user\",\"content\":%s}]}";
-    const char *format = provider == CRAB_PROVIDER_ANTHROPIC ? anthropic_format : openai_format;
-    int body_size = snprintf(NULL, 0, format, model, prompt);
-    char *body = body_size > 0 ? malloc((size_t)body_size + 1) : NULL;
+    char *body = malloc(CRAB_REQUEST_BYTES);
     if (!body) {
+        crab_conversation_clear(&context);
         SecureZeroMemory(key, sizeof(key));
         return E_OUTOFMEMORY;
     }
-    snprintf(body, (size_t)body_size + 1, format, model, prompt);
+    bool encoded =
+        crab_request_json(provider, model_name, question, &context, body, CRAB_REQUEST_BYTES);
+    crab_conversation_clear(&context);
+    if (!encoded || InterlockedCompareExchange(&service->cancel_request, 0, 0)) {
+        SecureZeroMemory(key, sizeof(key));
+        SecureZeroMemory(body, CRAB_REQUEST_BYTES);
+        free(body);
+        if (encoded)
+            return E_ABORT;
+        swprintf(detail, detail_count, L"Question, model, or conversation cannot be encoded");
+        return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+    }
+    size_t body_size = strlen(body);
     HINTERNET session = WinHttpOpen(user_agent, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                                     WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (session && !WinHttpSetTimeouts(session, 5000, 5000, 10000, 60000)) {
         HRESULT timeout_error = HRESULT_FROM_WIN32(GetLastError());
         WinHttpCloseHandle(session);
         SecureZeroMemory(key, sizeof(key));
-        SecureZeroMemory(body, (size_t)body_size + 1);
+        SecureZeroMemory(body, CRAB_REQUEST_BYTES);
         free(body);
         return timeout_error;
     }
@@ -855,6 +803,8 @@ static HRESULT ask_provider(CrabService *service, const wchar_t *question, wchar
     if (service->lock_ready)
         LeaveCriticalSection(&service->lock);
     HRESULT result = request ? S_OK : HRESULT_FROM_WIN32(GetLastError());
+    if (InterlockedCompareExchange(&service->cancel_request, 0, 0))
+        result = E_ABORT;
     DWORD redirect_policy = WINHTTP_OPTION_REDIRECT_POLICY_NEVER;
     if (SUCCEEDED(result) && !WinHttpSetOption(request, WINHTTP_OPTION_REDIRECT_POLICY,
                                                &redirect_policy, sizeof(redirect_policy)))
@@ -866,8 +816,10 @@ static HRESULT ask_provider(CrabService *service, const wchar_t *question, wchar
         key_length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, key, -1, NULL, 0);
         wide_key = key_length > 1 ? calloc((size_t)key_length, sizeof(wchar_t)) : NULL;
         if (!wide_key ||
-            !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, key, -1, wide_key, key_length))
+            !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, key, -1, wide_key, key_length)) {
+            swprintf(detail, detail_count, L"Saved API key encoding is invalid");
             result = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+        }
     }
     if (SUCCEEDED(result) && provider == CRAB_PROVIDER_ANTHROPIC)
         swprintf(headers, sizeof(headers) / sizeof(headers[0]),
@@ -891,9 +843,14 @@ static HRESULT ask_provider(CrabService *service, const wchar_t *question, wchar
          status < 200 || status >= 300))
         result = HRESULT_FROM_WIN32(status ? status : GetLastError());
     char *response = NULL;
-    if (SUCCEEDED(result) && (!response_read(request, &response) ||
-                              !crab_response_text(provider, response, answer, count)))
+    if (SUCCEEDED(result) && !response_read(request, &response)) {
+        swprintf(detail, detail_count, L"Provider response could not be read");
         result = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+    }
+    if (SUCCEEDED(result) && !crab_response_text(provider, response, answer, count)) {
+        swprintf(detail, detail_count, L"Provider response has no readable answer");
+        result = HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
+    }
     free(response);
     SecureZeroMemory(headers, sizeof(headers));
     if (wide_key) {
@@ -901,7 +858,7 @@ static HRESULT ask_provider(CrabService *service, const wchar_t *question, wchar
         free(wide_key);
     }
     SecureZeroMemory(key, sizeof(key));
-    SecureZeroMemory(body, (size_t)body_size + 1);
+    SecureZeroMemory(body, CRAB_REQUEST_BYTES);
     free(body);
     bool own_request = true;
     if (service->lock_ready)
@@ -945,28 +902,55 @@ static void speak_answer(CrabService *service, const wchar_t *answer) {
 
 static DWORD WINAPI crab_thread(void *argument) {
     CrabService *service = argument;
-    HRESULT initialized = RoInitialize(RO_INIT_MULTITHREADED);
-    HRESULT speech = initialized;
+    HRESULT initialized = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    SpeechBackend speech = {0};
     HANDLE events[] = {service->stop, service->wake};
     while (WaitForSingleObject(service->stop, 0) != WAIT_OBJECT_0) {
         if (WaitForMultipleObjects(2, events, FALSE, INFINITE) == WAIT_OBJECT_0)
             break;
-        if (!InterlockedCompareExchange(&service->enabled, 0, 0) ||
-            !InterlockedExchange(&service->listening, 0))
+        EnterCriticalSection(&service->lock);
+        bool activate = InterlockedCompareExchange(&service->enabled, 0, 0) &&
+                        InterlockedExchange(&service->listening, 0);
+        LONG generation = InterlockedCompareExchange(&service->generation, 0, 0);
+        if (activate)
+            InterlockedExchange(&service->busy, 1);
+        LeaveCriticalSection(&service->lock);
+        if (!activate)
             continue;
-        InterlockedExchange(&service->busy, 1);
-        InterlockedExchange(&service->cancel_request, 0);
-        if (FAILED(speech)) {
-            post_state(service, CRAB_ERROR, speech, NULL, NULL);
+        if (FAILED(initialized)) {
+            post_state(service, generation, CRAB_ERROR, initialized, NULL, NULL);
             InterlockedExchange(&service->busy, 0);
             continue;
         }
-        post_state(service, CRAB_LISTENING, S_OK, NULL, NULL);
         wchar_t transcript[768] = {0};
-        HRESULT result = modern_listen_once(service, transcript, 768);
+        wchar_t detail[160] = {0};
+        wchar_t speech_model[512];
+        EnterCriticalSection(&service->lock);
+        wcsncpy(speech_model, service->speech_model, 511);
+        speech_model[511] = L'\0';
+        LeaveCriticalSection(&service->lock);
+        SpeechCancel cancel = {.stop = service->stop, .cancel = &service->cancel_request};
+        post_state(service, generation, CRAB_THINKING, S_OK, NULL, NULL);
+        HRESULT result = speech_prepare(&speech, speech_model, &cancel, detail, 160);
+        float *samples = NULL;
+        size_t sample_count = 0;
+        if (SUCCEEDED(result)) {
+            post_state(service, generation, CRAB_LISTENING, S_OK, NULL, NULL);
+            result = speech_capture(&cancel, &samples, &sample_count, detail, 160);
+        }
+        if (SUCCEEDED(result)) {
+            post_state(service, generation, CRAB_THINKING, S_OK, NULL, NULL);
+            cancel.deadline = GetTickCount64() + 30000;
+            result = speech_transcribe(&speech, &cancel, samples, sample_count, transcript, 768,
+                                       detail, 160);
+        }
+        if (samples) {
+            SecureZeroMemory(samples, SPEECH_SAMPLE_RATE * SPEECH_MAX_SECONDS * sizeof(*samples));
+            free(samples);
+        }
         if (FAILED(result)) {
             if (result != E_ABORT)
-                post_state(service, CRAB_ERROR, result, transcript, NULL);
+                post_state(service, generation, CRAB_ERROR, result, transcript, detail);
             InterlockedExchange(&service->busy, 0);
             continue;
         }
@@ -977,21 +961,23 @@ static DWORD WINAPI crab_thread(void *argument) {
         wake_name[63] = L'\0';
         LeaveCriticalSection(&service->lock);
         if (!crab_wake_match(transcript, wake_name, question, 768)) {
-            post_state(service, CRAB_ERROR, HRESULT_FROM_WIN32(ERROR_INVALID_DATA), transcript,
-                       L"Start with the configured wake name, then ask a question.");
+            swprintf(detail, 160, L"No question heard. Please try again.");
+            post_state(service, generation, CRAB_ERROR, HRESULT_FROM_WIN32(ERROR_INVALID_DATA),
+                       transcript, detail);
             InterlockedExchange(&service->busy, 0);
             continue;
         }
-        post_state(service, CRAB_THINKING, S_OK, transcript, NULL);
+        post_state(service, generation, CRAB_THINKING, S_OK, transcript, NULL);
         wchar_t answer[2048] = {0};
-        result = ask_provider(service, question, answer, 2048);
+        detail[0] = L'\0';
+        result = ask_provider(service, question, answer, 2048, detail, 160);
         if (FAILED(result)) {
             if (result != E_ABORT)
-                post_state(service, CRAB_ERROR, result, transcript, NULL);
+                post_state(service, generation, CRAB_ERROR, result, transcript, detail);
             InterlockedExchange(&service->busy, 0);
             continue;
         }
-        post_state(service, CRAB_SPEAKING, S_OK, transcript, answer);
+        post_state(service, generation, CRAB_SPEAKING, S_OK, transcript, answer);
         if (InterlockedCompareExchange(&service->cancel_request, 0, 0)) {
             InterlockedExchange(&service->busy, 0);
             continue;
@@ -999,21 +985,23 @@ static DWORD WINAPI crab_thread(void *argument) {
         if (InterlockedCompareExchange(&service->speak, 0, 0))
             speak_answer(service, answer);
         InterlockedExchange(&service->busy, 0);
-        post_state(service, CRAB_IDLE, S_OK, transcript, answer);
+        post_state(service, generation, CRAB_IDLE, S_OK, transcript, answer);
     }
+    speech_destroy(&speech);
     if (SUCCEEDED(initialized))
-        RoUninitialize();
+        CoUninitialize();
     return 0;
 }
 
 bool crab_start(CrabService *service, HWND window, bool enabled, bool speak, CrabProvider provider,
-                const wchar_t *wake_name, const wchar_t *base_url, const wchar_t *model) {
+                const wchar_t *wake_name, const wchar_t *base_url, const wchar_t *model,
+                const wchar_t *speech_model) {
     *service = (CrabService){.window = window};
     InitializeCriticalSection(&service->lock);
     service->lock_ready = true;
     service->stop = CreateEventW(NULL, TRUE, FALSE, NULL);
     service->wake = CreateEventW(NULL, FALSE, FALSE, NULL);
-    crab_configure(service, enabled, speak, provider, wake_name, base_url, model);
+    crab_configure(service, enabled, speak, provider, wake_name, base_url, model, speech_model);
     if (service->stop && service->wake)
         service->thread = CreateThread(NULL, 0, crab_thread, service, 0, NULL);
     if (service->thread)
@@ -1025,7 +1013,8 @@ bool crab_start(CrabService *service, HWND window, bool enabled, bool speak, Cra
 }
 
 void crab_configure(CrabService *service, bool enabled, bool speak, CrabProvider provider,
-                    const wchar_t *wake_name, const wchar_t *base_url, const wchar_t *model) {
+                    const wchar_t *wake_name, const wchar_t *base_url, const wchar_t *model,
+                    const wchar_t *speech_model) {
     if (!service)
         return;
     if (service->lock_ready)
@@ -1037,6 +1026,8 @@ void crab_configure(CrabService *service, bool enabled, bool speak, CrabProvider
     service->base_url[511] = L'\0';
     wcsncpy(service->model, model ? model : L"", 95);
     service->model[95] = L'\0';
+    wcsncpy(service->speech_model, speech_model ? speech_model : L"", 511);
+    service->speech_model[511] = L'\0';
     if (service->lock_ready)
         LeaveCriticalSection(&service->lock);
     InterlockedExchange(&service->enabled, enabled ? 1 : 0);
@@ -1045,13 +1036,26 @@ void crab_configure(CrabService *service, bool enabled, bool speak, CrabProvider
         crab_cancel(service);
 }
 
-bool crab_listen(CrabService *service) {
-    if (!service || !service->thread || !InterlockedCompareExchange(&service->enabled, 0, 0) ||
+bool crab_listen(CrabService *service, const CrabConversation *conversation) {
+    if (!service || !service->thread || !service->lock_ready ||
+        !InterlockedCompareExchange(&service->enabled, 0, 0) ||
         InterlockedCompareExchange(&service->busy, 0, 0) ||
-        InterlockedCompareExchange(&service->listening, 0, 0))
+        InterlockedCompareExchange(&service->listening, 0, 0) ||
+        (conversation && conversation->count > CRAB_HISTORY))
         return false;
+    EnterCriticalSection(&service->lock);
+    if (InterlockedCompareExchange(&service->busy, 0, 0) ||
+        InterlockedCompareExchange(&service->listening, 0, 0)) {
+        LeaveCriticalSection(&service->lock);
+        return false;
+    }
+    crab_conversation_clear(&service->context);
+    if (conversation)
+        service->context = *conversation;
+    InterlockedIncrement(&service->generation);
     InterlockedExchange(&service->listening, 1);
     InterlockedExchange(&service->cancel_request, 0);
+    LeaveCriticalSection(&service->lock);
     SetEvent(service->wake);
     return true;
 }
@@ -1060,10 +1064,19 @@ void crab_cancel(CrabService *service) {
     if (!service)
         return;
     InterlockedExchange(&service->cancel_request, 1);
+    InterlockedIncrement(&service->generation);
     InterlockedExchange(&service->listening, 0);
     request_cancel(service);
     if (service->wake)
         SetEvent(service->wake);
+}
+
+void crab_clear_context(CrabService *service) {
+    if (!service || !service->lock_ready)
+        return;
+    EnterCriticalSection(&service->lock);
+    crab_conversation_clear(&service->context);
+    LeaveCriticalSection(&service->lock);
 }
 
 void crab_stop(CrabService *service) {
@@ -1072,6 +1085,7 @@ void crab_stop(CrabService *service) {
     if (!service->lock_ready)
         return;
     InterlockedExchange(&service->cancel_request, 1);
+    InterlockedIncrement(&service->generation);
     InterlockedExchange(&service->listening, 0);
     request_cancel(service);
     if (service->stop)
@@ -1086,6 +1100,7 @@ void crab_stop(CrabService *service) {
         CloseHandle(service->wake);
     if (service->stop)
         CloseHandle(service->stop);
+    crab_clear_context(service);
     if (service->lock_ready)
         DeleteCriticalSection(&service->lock);
     *service = (CrabService){0};

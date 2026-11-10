@@ -39,6 +39,8 @@ static void test_defaults(void) {
     CHECK(config.crab_provider == CRAB_PROVIDER_NONE);
     CHECK(!*config.crab_base_url);
     CHECK(!*config.crab_model);
+    CHECK(sizeof(config.crab_speech_model) / sizeof(config.crab_speech_model[0]) == 512);
+    CHECK(wcscmp(config.crab_speech_model, L"speech\\ggml-tiny.bin") == 0);
     CHECK(config_shortcuts_valid(&config));
     config.crab_shortcut = config.shortcuts[SHORTCUT_SEARCH];
     CHECK(!config_shortcuts_valid(&config));
@@ -90,6 +92,28 @@ static void test_limits(void) {
     CHECK(config.timer_seconds == 86400);
     CHECK(config.notification_alert_ms == 15000);
     CHECK(config.colors[TINT_ACCENT] == 0xffffff);
+}
+
+static void test_speech_model_normalization(void) {
+    AppConfig config;
+    config_defaults(&config);
+    wcscpy(config.crab_speech_model, L" \tC:\\Voice models\\\x00e7\\\x03a9\\tiny.bin \r\n");
+    config_normalize(&config);
+    CHECK(wcscmp(config.crab_speech_model, L"C:\\Voice models\\\x00e7\\\x03a9\\tiny.bin") == 0);
+    CHECK(config.crab_provider == CRAB_PROVIDER_NONE);
+    CHECK(!*config.crab_model);
+    wcscpy(config.crab_speech_model, L" \tspeech\\ggml-tiny.bin \n");
+    config_normalize(&config);
+    CHECK(wcscmp(config.crab_speech_model, L"speech\\ggml-tiny.bin") == 0);
+    wcscpy(config.crab_speech_model, L" \t\r\n");
+    config_normalize(&config);
+    CHECK(!*config.crab_speech_model);
+    wmemset(config.crab_speech_model, L'\x03a9', 512);
+    config_normalize(&config);
+    CHECK(config.crab_speech_model[511] == L'\0');
+    CHECK(wcslen(config.crab_speech_model) == 511);
+    CHECK(config.crab_speech_model[0] == L'\x03a9');
+    CHECK(config.crab_speech_model[510] == L'\x03a9');
 }
 
 static void test_placement(void) {
@@ -155,6 +179,7 @@ static void test_persistence(void) {
     wcscpy(saved.crab_base_url, L"http://127.0.0.1:11434/v1");
     wcscpy(saved.crab_name, L"Siri");
     wcscpy(saved.crab_model, L"llama3.2");
+    wcscpy(saved.crab_speech_model, L"C:\\Voice models\\\x00e7\\\x03a9\\ggml-tiny.bin");
     saved.crab_enabled = true;
     saved.crab_speak = false;
     saved.crab_shortcut = (ShortcutBinding){'K', MOD_CONTROL | MOD_ALT};
@@ -178,6 +203,7 @@ static void test_persistence(void) {
     CHECK(wcscmp(loaded.crab_base_url, L"http://127.0.0.1:11434/v1") == 0);
     CHECK(wcscmp(loaded.crab_name, L"Siri") == 0);
     CHECK(wcscmp(loaded.crab_model, L"llama3.2") == 0);
+    CHECK(wcscmp(loaded.crab_speech_model, saved.crab_speech_model) == 0);
     CHECK(loaded.crab_shortcut.key == 'K');
     CHECK(loaded.crab_shortcut.modifiers == (MOD_CONTROL | MOD_ALT));
     CHECK(loaded.colors[TINT_ACCENT] == saved.colors[TINT_ACCENT]);
@@ -196,6 +222,7 @@ static void test_persistence(void) {
     CHECK(config_load(&loaded, legacy_path));
     CHECK(loaded.crab_provider == CRAB_PROVIDER_ANTHROPIC);
     CHECK(wcscmp(loaded.crab_base_url, L"https://api.anthropic.com") == 0);
+    CHECK(wcscmp(loaded.crab_speech_model, L"speech\\ggml-tiny.bin") == 0);
     CHECK(DeleteFileW(legacy_path));
     CHECK(WritePrivateProfileStringW(L"DynamicWindows", L"idle_width", L"nan", path));
     CHECK(WritePrivateProfileStringW(L"DynamicWindows", L"frame_rate", L"99999999999999999", path));
@@ -206,6 +233,17 @@ static void test_persistence(void) {
     CHECK(loaded.frame_rate == 120);
     CHECK(loaded.opacity == 100);
     CHECK(loaded.colors[TINT_ACCENT] == 0x9dd8ff);
+    wcscpy(saved.crab_speech_model, L" \tspeech\\\x03a9\\ggml-tiny.bin \n");
+    CHECK(config_save(&saved, path));
+    CHECK(config_load(&loaded, path));
+    CHECK(wcscmp(loaded.crab_speech_model, L"speech\\\x03a9\\ggml-tiny.bin") == 0);
+    CHECK(wcscmp(loaded.crab_model, L"llama3.2") == 0);
+    saved.crab_enabled = false;
+    *saved.crab_speech_model = L'\0';
+    CHECK(config_save(&saved, path));
+    CHECK(config_load(&loaded, path));
+    CHECK(!*loaded.crab_speech_model);
+    CHECK(!loaded.crab_enabled);
     CHECK(DeleteFileW(path));
     CHECK(!config_load(&loaded, path));
     CHECK(loaded.idle == IDLE_BLANK);
@@ -214,12 +252,14 @@ static void test_persistence(void) {
     CHECK(config_load(&loaded, path));
     CHECK(wcscmp(loaded.idle_text, L"DynamicWindows") == 0);
     CHECK(wcscmp(loaded.idle_font, L"Segoe UI") == 0);
+    CHECK(wcscmp(loaded.crab_speech_model, L"speech\\ggml-tiny.bin") == 0);
     CHECK(DeleteFileW(path));
 }
 
 int main(void) {
     test_defaults();
     test_limits();
+    test_speech_model_normalization();
     test_placement();
     test_persistence();
     printf("%u configuration checks passed\n", checks);

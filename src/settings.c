@@ -294,7 +294,14 @@ static const SettingsField fields[] = {
     BOOLEAN(ID_SETTINGS_CRAB_SPEAK, PAGE_CRAB, crab_speak, L"Speak answers aloud",
             L"Use the installed Windows text-to-speech voice.", NULL),
     STRING(ID_SETTINGS_CRAB_NAME, PAGE_CRAB, FIELD_TEXT, crab_name, 63, L"Wake name",
-           L"Say this name first, followed by the question. Up to 63 characters.", L"Activation"),
+           L"Optional prefix after the shortcut. Ask directly or start with this name. Up to 63 "
+           L"characters.",
+           L"Activation"),
+    STRING(ID_SETTINGS_CRAB_SPEECH_MODEL, PAGE_CRAB, FIELD_TEXT, crab_speech_model, 511,
+           L"Speech model path",
+           L"Local audio recognition. Absolute or executable-relative path. Whisper runtime "
+           L"v1.8.2 is installed by packaging/setup-speech.ps1. Required when Crab is enabled.",
+           L"Local speech recognition"),
     CHOICE(ID_SETTINGS_CRAB_PROVIDER, PAGE_CRAB, FIELD_PROVIDER, crab_provider,
            CRAB_PROVIDER_OPENAI_COMPATIBLE, L"API format",
            L"Choose No provider, Anthropic Messages, or OpenAI-compatible Chat Completions.",
@@ -912,6 +919,7 @@ static bool read_field(SettingsState *state, size_t index, AppConfig *config) {
     if (field->kind == FIELD_TEXT || field->kind == FIELD_FONT) {
         bool required =
             field->kind == FIELD_FONT || field->id == ID_SETTINGS_CRAB_NAME ||
+            (field->id == ID_SETTINGS_CRAB_SPEECH_MODEL && config->crab_enabled) ||
             ((field->id == ID_SETTINGS_CRAB_MODEL || field->id == ID_SETTINGS_CRAB_BASE_URL) &&
              config->crab_provider != CRAB_PROVIDER_NONE);
         if (length > (int)field->maximum || (required && !*text))
@@ -972,7 +980,12 @@ static void field_help(const SettingsField *field, const AppConfig *config, bool
         swprintf(text, count, L"Enter a font name with 1 to 31 characters, for example Segoe UI.");
         break;
     case FIELD_TEXT:
-        swprintf(text, count, L"Use no more than %.0f characters.", field->maximum);
+        if (field->id == ID_SETTINGS_CRAB_SPEECH_MODEL)
+            swprintf(text, count,
+                     L"Enter a local speech model path with 1 to 511 characters when "
+                     L"Crab is enabled. Use an absolute or executable-relative path.");
+        else
+            swprintf(text, count, L"Use no more than %.0f characters.", field->maximum);
         break;
     default:
         swprintf(text, count, L"Choose an option from the list.");

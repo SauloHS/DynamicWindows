@@ -651,7 +651,7 @@ static void compact(App *app, bool add_hits) {
     if (app->crab_state == CRAB_ERROR) {
         wchar_t cause[160];
         wchar_t code[48];
-        app_crab_error_cause(app->crab_error, cause, 160);
+        app_crab_error_detail(app, cause, 160);
         swprintf(code, 48, L"Error 0x%08lX · Open settings", (unsigned long)app->crab_error);
         glyph(renderer, GLYPH_CLOSE, body.X + 34, middle, 22, COLOR_TIMER);
         text(renderer, cause, (RectF){body.X + 62, body.Y + 8, body.Width - 82, 25}, FONT_LABEL,
@@ -804,14 +804,15 @@ static void header(App *app, bool add_hits) {
     Renderer *renderer = &app->renderer;
     RectF body = renderer->body;
     static const Action actions[] = {ACTION_TAB_MEDIA, ACTION_TAB_TIMER, ACTION_TAB_SYSTEM,
-                                     ACTION_TAB_NOTIFICATIONS};
-    static const wchar_t *labels[] = {L"Playing", L"Timer", L"System", L"Alerts"};
-    static const REAL widths[] = {63, 51, 57, 51};
+                                     ACTION_TAB_NOTIFICATIONS, ACTION_TAB_CRAB};
+    static const IslandView views[] = {ISLAND_MEDIA, ISLAND_TIMER, ISLAND_SYSTEM,
+                                       ISLAND_NOTIFICATIONS, ISLAND_CRAB};
+    static const wchar_t *labels[] = {L"Playing", L"Timer", L"System", L"Alerts", L"Chat"};
+    static const REAL widths[] = {58, 46, 52, 46, 41};
     REAL x = body.X + 12;
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 5; ++i) {
         RectF rect = {x, body.Y + 11, widths[i], 29};
-        bool selected = (i < 3 && (int)app->island.view == i) ||
-                        (i == 3 && app->island.view == ISLAND_NOTIFICATIONS);
+        bool selected = app->island.view == views[i];
         if (add_hits)
             hit_add(app, rect, actions[i], true, labels[i]);
         if (selected || app->hover == actions[i])
@@ -821,14 +822,14 @@ static void header(App *app, bool add_hits) {
         if (focused(app, actions[i]))
             outline(renderer, (RectF){rect.X - 1, rect.Y - 1, rect.Width + 2, rect.Height + 2}, 11,
                     COLOR_ACCENT, 1.5);
-        x += widths[i] + 5;
+        x += widths[i] + 4;
     }
     if (app->config.search_button)
-        button(app, (RectF){body.X + body.Width - 82, body.Y + 10, 30, 30}, ACTION_SEARCH,
+        button(app, (RectF){body.X + body.Width - 112, body.Y + 10, 30, 30}, ACTION_SEARCH,
                L"Open Windows search", NULL, GLYPH_SEARCH, true, true, false, add_hits);
-    button(app, (RectF){body.X + body.Width - 120, body.Y + 10, 30, 30}, ACTION_SETTINGS,
+    button(app, (RectF){body.X + body.Width - 76, body.Y + 10, 30, 30}, ACTION_SETTINGS,
            L"Customize DynamicWindows", NULL, GLYPH_SETTINGS, true, true, false, add_hits);
-    button(app, (RectF){body.X + body.Width - 44, body.Y + 10, 30, 30}, ACTION_CLOSE,
+    button(app, (RectF){body.X + body.Width - 40, body.Y + 10, 30, 30}, ACTION_CLOSE,
            L"Collapse island", NULL, GLYPH_CLOSE, true, true, false, add_hits);
     line(renderer, body.X + 22, body.Y + 51, body.X + body.Width - 22, body.Y + 51, COLOR_BORDER,
          1);
@@ -1064,6 +1065,143 @@ static void notification_panel(App *app, bool add_hits) {
            app->notification_index > 0, false, add_hits);
 }
 
+typedef struct {
+    RectF rect;
+    const wchar_t *value;
+    const wchar_t *speaker;
+    unsigned turn;
+    bool user;
+    bool error;
+} ChatBubble;
+
+static REAL chat_height(Renderer *renderer, const wchar_t *value, REAL width) {
+    RectF layout = {0, 0, width, 16384};
+    RectF bounds = {0};
+    if (GdipMeasureString(renderer->graphics, value, -1, renderer->fonts[FONT_BODY], &layout,
+                          renderer->chat_format, &bounds, NULL, NULL) != Ok)
+        return 20;
+    return (REAL)ceil(fmax(20, bounds.Height));
+}
+
+static void chat_text(Renderer *renderer, const wchar_t *value, RectF rect, ARGB color) {
+    GpSolidFill *brush = NULL;
+    if (GdipCreateSolidFill(ink(renderer, color), &brush) != Ok)
+        return;
+    GdipDrawString(renderer->graphics, value, -1, renderer->fonts[FONT_BODY], &rect,
+                   renderer->chat_format, (GpBrush *)brush);
+    GdipDeleteBrush((GpBrush *)brush);
+}
+
+static void chat_bubble(App *app, const ChatBubble *bubble, RectF viewport, bool add_hits) {
+    Renderer *renderer = &app->renderer;
+    RectF rect = bubble->rect;
+    rect.Y += viewport.Y - (REAL)app->crab_scroll;
+    REAL top = fmaxf(rect.Y, viewport.Y);
+    REAL bottom = fminf(rect.Y + rect.Height, viewport.Y + viewport.Height);
+    if (bottom <= top)
+        return;
+    ARGB tint = bubble->user ? COLOR_ACCENT : COLOR_CONTROL;
+    if (bubble->user) {
+        double opacity = renderer->opacity;
+        renderer->opacity *= 0.18;
+        fill(renderer, rect, 14, tint);
+        renderer->opacity = opacity;
+    } else {
+        fill(renderer, rect, 14, tint);
+    }
+    text(renderer, bubble->speaker, (RectF){rect.X + 12, rect.Y + 8, rect.Width - 24, 17},
+         FONT_SMALL,
+         bubble->error  ? COLOR_TIMER
+         : bubble->user ? COLOR_ACCENT
+                        : COLOR_SECONDARY,
+         StringAlignmentNear);
+    chat_text(renderer, bubble->value,
+              (RectF){rect.X + 12, rect.Y + 29, rect.Width - 24, rect.Height - 39}, COLOR_TEXT);
+    if (add_hits) {
+        wchar_t label[600];
+        swprintf(label, 600, L"%ls: %.*ls", bubble->speaker, 520, bubble->value);
+        int index = hit_add(app, (RectF){rect.X, top, rect.Width, bottom - top},
+                            ACTION_CRAB_MESSAGE, true, label);
+        if (index >= 0) {
+            app->hits[index].chat_turn = bubble->turn;
+            app->hits[index].chat_user = bubble->user;
+            if (app->focus == index && GetForegroundWindow() == app->window)
+                outline(renderer, rect, 14, COLOR_ACCENT, 1.5);
+        }
+    }
+}
+
+static void crab_panel(App *app, bool add_hits) {
+    Renderer *renderer = &app->renderer;
+    RectF body = renderer->body;
+    RectF viewport = {body.X + 20, body.Y + 61, body.Width - 40, body.Height - 115};
+    ChatBubble bubbles[CRAB_HISTORY * 2];
+    unsigned count = 0;
+    REAL y = 0;
+    REAL width = viewport.Width * 0.86f;
+    for (unsigned i = 0; i < app->crab_conversation.count; ++i) {
+        const CrabTurn *turn = &app->crab_conversation.turns[i];
+        if (*turn->transcript) {
+            REAL height = chat_height(renderer, turn->transcript, width - 24) + 39;
+            bubbles[count++] = (ChatBubble){{viewport.X + viewport.Width - width, y, width, height},
+                                            turn->transcript,
+                                            L"You · heard",
+                                            i,
+                                            true,
+                                            false};
+            y += height + 8;
+        }
+        const wchar_t *value = crab_turn_reply(turn);
+        REAL height = chat_height(renderer, value, width - 24) + 39;
+        bubbles[count++] =
+            (ChatBubble){{viewport.X, y, width, height}, value, app->config.crab_name, i, false,
+                         turn->state == CRAB_TURN_ERROR};
+        y += height + 14;
+    }
+    app->crab_scroll_max = fmax(0, y - viewport.Height);
+    app->crab_scroll = app->crab_follow_latest
+                           ? app->crab_scroll_max
+                           : island_clamp(app->crab_scroll, 0, app->crab_scroll_max);
+    if (!count) {
+        text(renderer, L"Ask a question, see what was heard",
+             (RectF){viewport.X, viewport.Y + 24, viewport.Width, 28}, FONT_TITLE, COLOR_TEXT,
+             StringAlignmentCenter);
+        chat_text(renderer,
+                  L"Press Talk or use your Crab shortcut. Your words and replies stay "
+                  L"here only until you clear them or quit.",
+                  (RectF){viewport.X + 22, viewport.Y + 66, viewport.Width - 44, 66},
+                  COLOR_SECONDARY);
+    } else {
+        GraphicsState state;
+        if (GdipSaveGraphics(renderer->graphics, &state) == Ok) {
+            GdipSetClipRect(renderer->graphics, viewport.X, viewport.Y, viewport.Width,
+                            viewport.Height, CombineModeIntersect);
+            for (unsigned i = 0; i < count; ++i)
+                chat_bubble(app, &bubbles[i], viewport, add_hits);
+            GdipRestoreGraphics(renderer->graphics, state);
+        }
+    }
+    REAL controls_y = body.Y + body.Height - 42;
+    bool busy = InterlockedCompareExchange(&app->crab_service.busy, 0, 0) ||
+                InterlockedCompareExchange(&app->crab_service.listening, 0, 0);
+    button(app, (RectF){body.X + 20, controls_y, 74, 30}, ACTION_CRAB,
+           L"Ask Crab using the microphone", L"Talk", GLYPH_MUSIC, false,
+           app->config.crab_enabled && !busy, false, add_hits);
+    button(app, (RectF){body.X + 102, controls_y, 70, 30}, ACTION_CRAB_CLEAR,
+           L"Clear conversation from memory", L"Clear", GLYPH_CLOSE, false, count != 0, false,
+           add_hits);
+    wchar_t position[40];
+    swprintf(position, 40, L"%u exchanges", app->crab_conversation.count);
+    text(renderer, position, (RectF){body.X + 180, controls_y, body.Width - 280, 30}, FONT_SMALL,
+         COLOR_SECONDARY, StringAlignmentCenter);
+    button(app, (RectF){body.X + body.Width - 88, controls_y, 30, 30}, ACTION_CRAB_SCROLL_UP,
+           L"Scroll to earlier messages", NULL, GLYPH_PREVIOUS, true, app->crab_scroll > 0, false,
+           add_hits);
+    button(app, (RectF){body.X + body.Width - 50, controls_y, 30, 30}, ACTION_CRAB_SCROLL_DOWN,
+           L"Scroll to later messages", NULL, GLYPH_NEXT, true,
+           app->crab_scroll < app->crab_scroll_max, false, add_hits);
+}
+
 static void release_surface(Renderer *renderer) {
     if (renderer->graphics)
         GdipDeleteGraphics(renderer->graphics);
@@ -1158,6 +1296,11 @@ bool renderer_init(App *app) {
         return false;
     GdipSetStringFormatLineAlign(renderer->text_format, StringAlignmentCenter);
     GdipSetStringFormatTrimming(renderer->text_format, StringTrimmingEllipsisCharacter);
+    if (GdipCreateStringFormat(0, LANG_NEUTRAL, &renderer->chat_format) != Ok)
+        return false;
+    GdipSetStringFormatAlign(renderer->chat_format, StringAlignmentNear);
+    GdipSetStringFormatLineAlign(renderer->chat_format, StringAlignmentNear);
+    GdipSetStringFormatTrimming(renderer->chat_format, StringTrimmingNone);
     return earbuds_init(app) && renderer_style(app) && renderer_resize(app);
 }
 
@@ -1193,6 +1336,8 @@ void renderer_destroy(Renderer *renderer) {
         IStream_Release(renderer->artwork_stream);
     if (renderer->text_format)
         GdipDeleteStringFormat(renderer->text_format);
+    if (renderer->chat_format)
+        GdipDeleteStringFormat(renderer->chat_format);
     for (unsigned i = 0; i < EARBUD_PATH_COUNT; ++i)
         if (renderer->earbuds[i])
             GdipDeletePath(renderer->earbuds[i]);
@@ -1339,6 +1484,8 @@ bool renderer_draw(App *app) {
             system_panel(app, add_hits);
         else if (app->island.view == ISLAND_NOTIFICATIONS)
             notification_panel(app, add_hits);
+        else if (app->island.view == ISLAND_CRAB)
+            crab_panel(app, add_hits);
         else
             media_panel(app, add_hits);
         GdipRestoreGraphics(renderer->graphics, state);

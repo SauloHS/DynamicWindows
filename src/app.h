@@ -64,7 +64,12 @@ typedef enum {
     ACTION_TAB_NOTIFICATIONS,
     ACTION_NOTIFICATION_PREVIOUS,
     ACTION_NOTIFICATION_NEXT,
-    ACTION_CRAB
+    ACTION_CRAB,
+    ACTION_TAB_CRAB,
+    ACTION_CRAB_SCROLL_UP,
+    ACTION_CRAB_SCROLL_DOWN,
+    ACTION_CRAB_CLEAR,
+    ACTION_CRAB_MESSAGE
 } Action;
 
 typedef struct {
@@ -72,6 +77,8 @@ typedef struct {
     Action action;
     bool enabled;
     wchar_t label[600];
+    unsigned chat_turn;
+    bool chat_user;
 } UiHit;
 
 typedef enum {
@@ -99,6 +106,7 @@ typedef struct {
     GpFontFamily *idle_family;
     GpFont *idle_font;
     GpStringFormat *text_format;
+    GpStringFormat *chat_format;
     GpImage *artwork;
     IStream *artwork_stream;
     GpPath *earbuds[EARBUD_PATH_COUNT];
@@ -185,6 +193,10 @@ typedef struct App {
     HRESULT crab_error;
     wchar_t crab_transcript[768];
     wchar_t crab_answer[2048];
+    CrabConversation crab_conversation;
+    double crab_scroll;
+    double crab_scroll_max;
+    bool crab_follow_latest;
     double crab_phase;
     AppNotification notifications[NOTIFICATION_HISTORY];
     unsigned notification_count;
@@ -238,6 +250,7 @@ void app_idle_label(const App *app, wchar_t *text, size_t count);
 void app_summary(const App *app, wchar_t *text, size_t count);
 void app_crab_error_cause(HRESULT error, wchar_t *text, size_t count);
 void app_crab_error_text(HRESULT error, wchar_t *text, size_t count);
+void app_crab_error_detail(const App *app, wchar_t *text, size_t count);
 void app_clock(uint64_t milliseconds, wchar_t *text, size_t count);
 IAccessible *accessibility_create(App *app);
 void accessibility_disconnect(App *app);

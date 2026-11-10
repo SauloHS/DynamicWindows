@@ -134,6 +134,7 @@ typedef struct {
     wchar_t crab_name[64];
     wchar_t crab_base_url[512];
     wchar_t crab_model[96];
+    wchar_t crab_speech_model[512];
     ShortcutBinding shortcuts[SHORTCUT_COUNT];
 } AppConfig;
 
